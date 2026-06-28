@@ -21,8 +21,21 @@ import asyncio
 import json
 import re
 
-from oprim._aii_graph_types import (
-    OntologyExtractResult, VALID_RELATION_TYPES, VALID_KNOWLEDGE_TYPES, VALID_SUB_TYPES)
+from dataclasses import dataclass
+from aii.service.onto_vocab import (
+    VALID_RELATION_TYPES, VALID_KNOWLEDGE_TYPES, VALID_SUB_TYPES)
+
+
+# OntologyExtractResult was dropped from oprim (main-lib version drift); define the
+# same shape locally so this extractor stays self-contained. Fields match what
+# persist_ontology_result consumes.
+@dataclass
+class OntologyExtractResult:
+    outline: dict
+    ku_candidates: list
+    edge_candidates: list
+    concept_candidates: list
+    stats: dict
 
 
 def _split_chunks(text: str, chunk_size: int) -> list[str]:
