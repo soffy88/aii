@@ -15,3 +15,5 @@ build/
 *.egg-info/
 backups/
 .pipeline_keys.json
+flywheel_queue/*.done
+math_pipeline/staging/

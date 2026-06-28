@@ -65,16 +65,17 @@ CHANNELS = {
 }
 
 
-def _running_pids(match: str) -> list[int]:
+def _running_pids(cid: str) -> list[int]:
+    """飞轮进程检测: cmdline 含 'flywheel_channel.sh <cid>'(持续运转, sleep 时也算运行)."""
     pids = []
-    for env_path in glob.glob("/proc/[0-9]*/environ"):
+    for cl in glob.glob("/proc/[0-9]*/cmdline"):
         try:
-            data = open(env_path, "rb").read().decode("utf-8", "replace")
+            data = open(cl, "rb").read().replace(b"\x00", b" ").decode("utf-8", "replace")
         except Exception:
             continue
-        if f"AII_MD_FILE=" in data and match in data:
+        if "flywheel_channel.sh" in data and f" {cid}" in data:
             try:
-                pids.append(int(env_path.split("/")[2]))
+                pids.append(int(cl.split("/")[2]))
             except Exception:
                 pass
     return pids
@@ -111,7 +112,7 @@ async def list_pipelines():
             ku = await conn.fetchval(
                 "SELECT count(*) FROM aii.ku_onto WHERE substrate_id=$1", c["substrate"])
             staged = _staging_ku(c["substrate"])
-            pids = _running_pids(c["match"])
+            pids = _running_pids(cid)
             out.append({
                 "id": cid, "name": c["name"], "substrate": c["substrate"],
                 "total_chapters": c["total"], "ku_count": (ku or 0) or staged,
@@ -130,17 +131,17 @@ async def start_pipeline(cid: str):
     c = CHANNELS.get(cid)
     if not c:
         raise HTTPException(404, "unknown channel")
-    if _running_pids(c["match"]):
+    if _running_pids(cid):
         return {"status": "ok", "msg": "already running"}
-    keys = _keys()
-    env = {**os.environ, **c["env"](keys)}
-    if c["key_id"] in ("econ", "math_en") and not keys.get(c["key_id"]):
+    if not _keys().get(c["key_id"]):
         raise HTTPException(400, f"通道 {cid} 未配置 NIM key(.pipeline_keys.json)")
     c["log"].parent.mkdir(parents=True, exist_ok=True)
     logf = open(c["log"], "ab")
-    subprocess.Popen(c["cmd"], cwd=str(ROOT), env=env,
+    # ★启动持续飞轮(不停运转: 处理队列→入库→sleep监视新书→循环). key 由飞轮自读.
+    subprocess.Popen(["bash", "flywheel_channel.sh", cid], cwd=str(ROOT),
+                     env={**os.environ, "DATABASE_URL": DSN},
                      stdout=logf, stderr=logf, start_new_session=True)
-    return {"status": "ok", "msg": f"{cid} started"}
+    return {"status": "ok", "msg": f"{cid} flywheel started"}
 
 
 @router.post("/pipelines/{cid}/stop")
@@ -149,7 +150,7 @@ async def stop_pipeline(cid: str):
     if not c:
         raise HTTPException(404, "unknown channel")
     killed = []
-    for pid in _running_pids(c["match"]):
+    for pid in _running_pids(cid):
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             killed.append(pid)
