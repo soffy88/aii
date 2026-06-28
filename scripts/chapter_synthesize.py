@@ -49,17 +49,26 @@ _HARD_BOUNDARY_RE = re.compile(
 )
 _SOFT_BOUNDARY_RE = re.compile(r'(?m)^#{1,4}\s+')
 
-# ── 窗口噪音清洗(页内污染源: 图片占位/页眉页脚) ──
+# ── 窗口噪音清洗(页内污染源: 图片占位/脚注/引文/页码/URL) ──
 # OCR管道留下的图片占位符(每章15~31个)纯噪音; 喂给LLM前清掉, 让WHY窗口更干净.
 _PIC_NOISE_RE  = re.compile(r'\*\*\s*==>.*?omitted.*?<==\s*\*\*', re.I | re.S)
 _IMG_TAG_RE    = re.compile(r'!\[[^\]]*\]\([^)]*\)')   # markdown 图片标签(alt文本非定义, 易误当def)
+# 脚注行: OCR 常把脚注号与作者/引文粘连成行首("23Stephen Coate, ..."); 数字紧跟大写/引号(无空格)= 脚注.
+# (真列表项是 "23. " 或 "23 " 带分隔符, 不会被误伤)
+_FOOTNOTE_RE   = re.compile(r'(?m)^\s*>?\s*\d{1,3}(?=[A-Z“‘"\'])[^\n]{0,240}$')
+_URL_LINE_RE   = re.compile(r'(?m)^[^\n]*(?:https?://|www\.)\S[^\n]*$')   # URL/引文出处行
+_PAGENUM_RE    = re.compile(r'(?m)^\s*\d{1,4}\s*$')                        # 孤立页码行(OCR 页眉页脚)
 _BLANKS_RE     = re.compile(r'\n{3,}')
 
 
 def _clean_window(s: str) -> str:
-    """清洗喂给LLM的窗口: 去图片占位符/图片标签等纯噪音, 收敛多余空行."""
+    """清洗喂给LLM的窗口: 去图片占位/图片标签/脚注/URL引文/孤立页码等页内污染, 收敛多余空行.
+    ★边界全覆盖: 这些混进窗口会污染定义抽取与 WHY 窗口, 治本在喂 LLM 前清掉."""
     s = _PIC_NOISE_RE.sub("", s)
     s = _IMG_TAG_RE.sub("", s)
+    s = _FOOTNOTE_RE.sub("", s)
+    s = _URL_LINE_RE.sub("", s)
+    s = _PAGENUM_RE.sub("", s)
     return _BLANKS_RE.sub("\n\n", s).strip()
 
 
@@ -231,6 +240,14 @@ def _facets(typ):
             "method": "WHAT, WHEN, HOW(steps), WHY"}.get(typ, "WHAT, WHY, HOW")
 
 
+def _not_toc(tl: str, start: int) -> bool:
+    """该位置所在行是否*不是*目录条目(目录行尾是裸页码, 如 '… Demand 263**')."""
+    le = tl.find("\n", start)
+    ls = tl.rfind("\n", 0, start) + 1
+    line = tl[ls: le if le >= 0 else len(tl)]
+    return not re.search(r'\d{2,4}\s*\*{0,2}\s*$', line)
+
+
 def _find_pos(text: str, name: str) -> int:
     """★定位知识点的*定义性*出现(不是顺带提一句的那处). 未找到返回 -1.
     优先级(治本: 定位准→骨架窗口/WHY窗口/边界都准):
@@ -241,8 +258,17 @@ def _find_pos(text: str, name: str) -> int:
       5. 首次出现(原行为, 词边界兜底)
     ★全程用 \\b 词边界, 杜绝 'elastic' 误命中 'inelastic' 这类子串错位."""
     variants = _name_variants(name)
-    # 1. 全大写定义框(原文大小写敏感): **EXPLICIT COST** 优先于运行文里的 **explicit cost**
-    for v in dict.fromkeys(x.upper() for x in variants):
+    upper_vs = list(dict.fromkeys(x.upper() for x in variants))
+    # 1a. 全大写定义框 + 后接定义句(The/A/An/"大写词 is/are/refers/means") — 教材定义框最权威,
+    #     优先于"小节内顺带加粗"或"列表里点名"的那处(治本: 定位到真讲它的地方).
+    for v in upper_vs:
+        m = re.search(
+            rf'\*\*\s*{re.escape(v)}\s*\*\*\s+(?:The\b|An?\b|[A-Z][a-z]+\s+(?:is|are|means?|refers?))',
+            text)
+        if m:
+            return m.start()
+    # 1b. 任意全大写定义框 **TERM**(兜底): **EXPLICIT COST** 优先于运行文里的 **explicit cost**
+    for v in upper_vs:
         m = re.search(rf'\*\*\s*{re.escape(v)}\s*\*\*', text)
         if m:
             return m.start()
@@ -258,22 +284,25 @@ def _find_pos(text: str, name: str) -> int:
             line = tl[m.start(): tl.find("\n", m.start())]
             if re.match(r'#\s+chapter\s+\d', line):
                 continue
+            if re.search(r'\d{2,4}\s*\*{0,2}\s*$', line):  # 目录条目: 行尾带页码 → 跳过(非真定义节)
+                continue
             return m.start()
-    # 4. 'TERM is/are/means/refers to/defined as' 定义句
+    # 4. 'TERM is/are/means/refers to/defined as' 定义句(跳过目录条目)
     for v in list(dict.fromkeys(x.lower() for x in variants))[:4]:
-        m = re.search(
-            rf'\b{re.escape(v)}\b[^.\n]{{0,40}}\b(?:is|are|means?|refers?\s+to|is\s+defined\s+as)\b', tl)
-        if m:
+        for m in re.finditer(
+            rf'\b{re.escape(v)}\b[^.\n]{{0,40}}\b(?:is|are|means?|refers?\s+to|is\s+defined\s+as|measures?|calculated)\b', tl):
+            if _not_toc(tl, m.start()):
+                return m.start()
+    # 5. 兜底: 首次出现(词边界, 跳过目录)— 全名前30字符, 再退最长有意义词
+    for m in re.finditer(rf'\b{re.escape(name.lower()[:30])}', tl):
+        if _not_toc(tl, m.start()):
             return m.start()
-    # 5. 兜底: 首次出现(词边界)— 全名前30字符, 再退最长有意义词
-    m = re.search(rf'\b{re.escape(name.lower()[:30])}', tl)
-    if m:
-        return m.start()
     for word in sorted(name.split(), key=len, reverse=True):
         if len(word) > 4:
-            mm = re.search(rf'\b{re.escape(word.lower())}', tl)
-            if mm:
-                return mm.start()
+            for mm in re.finditer(rf'\b{re.escape(word.lower())}', tl):
+                if _not_toc(tl, mm.start()):
+                    return mm.start()
+            break
     return -1
 
 
