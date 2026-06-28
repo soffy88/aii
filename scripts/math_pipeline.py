@@ -41,7 +41,11 @@ def slice_chapter(text, n):
 SM = Path(os.getenv("AII_MD_FILE",
     "/home/soffy/shared/stratum-to-aii/Principles_of_Microeconomics_The_Way_We__01KVAJCX.md"))
 
-from math_should_have import extract
+# ★语言通道: MATH_LANG=en → 英文数学书专用应有清单(Definition/Theorem 等); 否则中文版.
+if os.getenv('MATH_LANG', '').lower() == 'en':
+    from math_should_have_en import extract
+else:
+    from math_should_have import extract
 KEY = os.getenv('DEEPSEEK_API_KEY')
 
 # ★LLM 端点: 设 NVIDIA_NIM_API_KEY → 用 NIM(云端OpenAI兼容, 快+可并发); 否则 DeepSeek.

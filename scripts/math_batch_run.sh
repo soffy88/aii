@@ -157,6 +157,7 @@ else:
     ch_list = ','.join(str(c) for c in sorted(chapters))
     print(f'PASS:{n_ch}章({ch_list})')
 PYEOF
+)
 
     if [[ "$PRECHECK" == FAIL* ]]; then
         echo "  ❌ 预检失败: $PRECHECK → 不进管道"
@@ -172,7 +173,7 @@ PYEOF
     fi
 
     # ── 检测章节列表 ──
-    CH_LIST=$($PY - <<PYEOF 2>/dev/null || echo ""
+    CH_LIST=$(_MATH_MD="$MD_PATH" $PY - <<'PYEOF' 2>/dev/null || echo ""
 import re, os
 _CN = {'一':1,'二':2,'三':3,'四':4,'五':5,'六':6,'七':7,'八':8,'九':9,'十':10}
 def _cn2int(s):
@@ -181,7 +182,7 @@ def _cn2int(s):
     if '十' in s:
         a,_,b = s.partition('十'); return _CN[a]*10+(_CN.get(b,0) if b else 0)
     return _CN.get(s, 0)
-text = open('$MD_PATH', encoding='utf-8', errors='replace').read()
+text = open(os.environ['_MATH_MD'], encoding='utf-8', errors='replace').read()
 chapters = {}
 for m in re.finditer(r'(?m)^第([一二三四五六七八九十]+)章', text):
     line = text[m.start(): m.start()+80]
