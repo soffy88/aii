@@ -24,11 +24,13 @@ async def go():
           f"主题KC(知识结构):\n{topics}\n\n"
           f"★数据算出的枢纽概念(度中心, 括号=涉及KU数)= 知识骨架支柱:\n{hubtxt}\n\n"
           f"KU样本(覆盖广度): {samptxt}")
-    r=httpx.post("https://api.deepseek.com/chat/completions",headers={"Authorization":"Bearer "+KEY},
-      json={"model":"deepseek-v4-flash","response_format":{"type":"json_object"},
-            "messages":[{"role":"system","content":SYS},{"role":"user","content":body}]},timeout=90)
-    j=json.loads(r.json()["choices"][0]["message"]["content"])
-    import pathlib; pathlib.Path("$SC/bu.json".replace("$SC","/tmp/claude-1000/-home-soffy-projects-AII/bebc9349-7f09-4086-abef-c4c9a94f4c0c/scratchpad")).write_text(json.dumps(j,ensure_ascii=False,indent=2))
+    # ★走 ProviderRegistry: ECON_LLM_PROVIDER=ollama → gemma4(本地); 否则 DeepSeek. call_sync=JSON mode.
+    from aii.api._provider import register_providers
+    from obase import ProviderRegistry
+    register_providers()
+    llm = ProviderRegistry.get().llm("default")
+    j = json.loads(llm.call_sync(SYS + "\n\n" + body))
+    import pathlib; pathlib.Path("econ_pipeline").mkdir(exist_ok=True); pathlib.Path(f"econ_pipeline/bu_{SUB}.json").write_text(json.dumps(j,ensure_ascii=False,indent=2))
     labels=[("①一句话灵魂","soul"),("②背景定位","positioning"),("③根本问题","question"),("④知识骨架","skeleton"),("⑤思维方式","thinking"),("⑥适合谁/能干什么","for_whom"),("⑦诚实边界","boundary")]
     for lab,k in labels: print(f"\n【{lab}】\n{j.get(k,'(缺)')}")
 asyncio.run(go())

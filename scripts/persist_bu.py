@@ -3,14 +3,16 @@ from pathlib import Path
 from dotenv import load_dotenv; load_dotenv("/home/soffy/projects/AII/aii/.env", override=True)
 SUB=os.getenv('SUBSTRATE','microecon_en_full_v2'); KEY=os.getenv('DEEPSEEK_API_KEY')
 async def go():
-    bu=json.loads(Path("/tmp/claude-1000/-home-soffy-projects-AII/bebc9349-7f09-4086-abef-c4c9a94f4c0c/scratchpad/bu.json").read_text())
+    bu=json.loads(Path(f"econ_pipeline/bu_{SUB}.json").read_text())
     # 边界用生成版(忠实校验在 generate 阶段做; 不再硬编码 microecon 边界)
     zh={k:bu[k] for k in ['soul','positioning','question','skeleton','thinking','for_whom','boundary']}
     SYS="Translate each JSON value to concise English. Output JSON same keys, English values only."
-    r=httpx.post("https://api.deepseek.com/chat/completions",headers={"Authorization":"Bearer "+KEY},
-      json={"model":"deepseek-v4-flash","response_format":{"type":"json_object"},
-            "messages":[{"role":"system","content":SYS},{"role":"user","content":json.dumps(zh,ensure_ascii=False)}]},timeout=60)
-    en=json.loads(r.json()["choices"][0]["message"]["content"])
+    # ★走 ProviderRegistry: ECON_LLM_PROVIDER=ollama → gemma4(本地); 否则 DeepSeek. call_sync=JSON mode.
+    from aii.api._provider import register_providers
+    from obase import ProviderRegistry
+    register_providers()
+    llm = ProviderRegistry.get().llm("default")
+    en = json.loads(llm.call_sync(SYS + "\n\n" + json.dumps(zh, ensure_ascii=False)))
     c=await asyncpg.connect(os.getenv('DATABASE_URL'))
     await c.execute("ALTER TABLE aii.bu_onto ADD COLUMN IF NOT EXISTS facets_zh jsonb")
     await c.execute("ALTER TABLE aii.bu_onto ADD COLUMN IF NOT EXISTS facets_en jsonb")
