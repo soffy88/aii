@@ -24,7 +24,7 @@ _CTX = 130000
 _WIN_PRE        = 500    # 知识点 pos 前的 chars(标准路径)
 # ★★ 固化标识: 经济学管道程序端标准版本(随 econ_pipeline.sh econ-std-v1.1) ★★
 # v1.1: A定位优先真定义框+跳目录 / B窗口清脚注·URL·页码 / C-D WHAT骨架+例子去重(成熟)
-PIPELINE_VERSION = "econ-std-v1.1"
+PIPELINE_VERSION = "econ-std-v1.2"  # v1.2: plan 用14K小块(密度大的章granular抽取, 不被LLM摘要成~10个)
 
 _WIN_POST       = 20000  # 知识点 pos 后的 chars(标准路径)
 _WIN_FALLBACK   = 40000  # pos 未找到时 fallback
@@ -347,7 +347,9 @@ async def _plan(llm, text, n):
       若块>上限会被截断、且指令在文本后→指令被切掉→空规划. 故块要 fit 上限, 指令放最前."""
     import os
     _lim = int(os.getenv("OLLAMA_PROMPT_CHARS", str(_CTX)))
-    _ck = min(_CTX, max(8000, _lim - 2500))
+    # ★plan 用较小块(默认14K): 密度大的章若整章塞1次调用, LLM会"摘要"成~10个主概念而漏抽;
+    #   小块→每块都granular抽概念→合并后覆盖更全. Ollama 上限更小则取更小.
+    _ck = min(_CTX, max(8000, _lim - 2500), int(os.getenv("PLAN_CHUNK_CHARS", "14000")))
     chunks = [text] if len(text) <= _ck else [text[i:i + _ck] for i in range(0, len(text), _ck)]
     pts = []
     for ck in chunks:
