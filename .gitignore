@@ -14,3 +14,4 @@ build/
 *:Zone.Identifier
 *.egg-info/
 backups/
+.pipeline_keys.json
