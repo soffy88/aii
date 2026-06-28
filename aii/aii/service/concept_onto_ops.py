@@ -237,6 +237,131 @@ async def vectorize_and_normalize(conn, llm, *, substrate_id: str, discipline: s
             "merged": merged_total, "candidates": len(cand), "groups": group_report}
 
 
+# ★判别词硬闸(确定性, 在 LLM 判同之前): 挡 LLM 漏判的 price/income/supply/demand 等混淆.
+# 互斥家族: 两名各取该家族不同值 → 强制 DIFFERENT(price-inelastic vs income-inelastic).
+_DISC_FAMILIES = [
+    {"price", "income"}, {"supply", "demand"}, {"import", "export"},
+    {"short-run", "long-run"}, {"short run", "long run"}, {"nominal", "real"},
+    {"gross", "net"}, {"micro", "macro"}, {"buyer", "seller"}, {"employer", "employee"},
+    {"供给", "需求"}, {"价格", "收入"}, {"短期", "长期"}, {"进口", "出口"},
+]
+# 区分性修饰词: 一名有、另一名没有 → 强制 DIFFERENT(perfectly inelastic ≠ inelastic; increasing OC ≠ OC).
+# (arc/point 故意不在内 → 它们是同一量的测量法变体, 交给 LLM 判可能 SAME)
+_DISC_QUALIFIERS = [
+    "increasing", "decreasing", "perfectly", "unitary", "cross",
+    "marginal", "inferior", "complement", "substitute", "递增", "递减", "边际",
+]
+
+
+def _forced_different(a: str, b: str) -> bool:
+    """★判别词硬闸: 判别词矛盾则强制 DIFFERENT(不进 LLM, 确定性挡混淆)."""
+    la, lb = (a or "").lower(), (b or "").lower()
+    for fam in _DISC_FAMILIES:                      # 互斥家族取不同值
+        va = {w for w in fam if w in la}
+        vb = {w for w in fam if w in lb}
+        if va and vb and va != vb:
+            return True
+    for q in _DISC_QUALIFIERS:                       # 区分性修饰词一边有一边无
+        if (q in la) != (q in lb):
+            return True
+    return False
+
+
+async def vectorize_and_normalize_global(conn, llm, *, name_filter: str | None = None,
+                                         screen_threshold: float = 0.85, concurrency: int = 5,
+                                         dry_run: bool = False) -> dict:
+    """★M0: 全局/跨书概念语义归一. 复用 per-book 同一套逻辑(向量筛候选 + LLM 判同 + 防错合闸),
+    唯一区别 = 作用域从单本(WHERE substrate_id=$1)扩到全库(concept_onto 全集).
+
+    ★三道防错合闸(全局更易错合, 这些闸必须在):
+      ① discipline 硬隔离(_forbid): 同名不同学科不合.
+      ② ★判别词硬闸(_forced_different, 在 LLM 之前): price/income/supply/demand/perfectly/increasing
+         等判别词矛盾 → 确定性 DIFFERENT, 不给 LLM 错判机会.
+      ③ LLM 判同(_judge_same_pairs): 判别词相同时, 判语义, 反义/不确定 → DIFFERENT.
+      宁留碎片不错合: 错合污染上层超边/本性.
+
+    name_filter(ILIKE)可限一组先验证; ★dry_run=True 只算+返回"会合并哪些"不落库.
+    """
+    where = "WHERE name ILIKE $1" if name_filter else ""
+    args = [name_filter] if name_filter else []
+    rows = await conn.fetch(
+        f"SELECT concept_id, name, discipline, vector FROM aii.concept_onto {where} ORDER BY name", *args)
+    cids = [r["concept_id"] for r in rows]
+    names = [r["name"] for r in rows]
+    if len(cids) < 2:
+        return {"before": len(cids), "after": len(cids), "merged": 0, "candidates": 0, "groups": []}
+
+    # 向量: 全部重编(同 BGE-M3 空间一致), 顺带回填缺 vector 的概念(0 成本)
+    vecs = _encode(names)
+    for cid, vec, r in zip(cids, vecs, rows):
+        if r["vector"] is None:
+            await conn.execute("UPDATE aii.concept_onto SET vector=$1 WHERE concept_id=$2",
+                               vec.tolist(), cid)
+
+    link_cnt = {r["concept_id"]: r["n"] for r in await conn.fetch(
+        "SELECT concept_id, count(*) n FROM aii.ku_concept_onto GROUP BY 1")}
+    disciplines = [r["discipline"] for r in rows]
+
+    def _forbid(i, j):  # ★防错合闸①: 同名不同学科禁合
+        a, b = disciplines[i], disciplines[j]
+        return bool(a and b and a != b)
+
+    # ① 向量筛候选(矩阵余弦, 排除跨学科)
+    E = np.asarray(vecs, dtype=np.float32)
+    En = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-12)
+    S = En @ En.T
+    iu = np.triu_indices(len(cids), k=1)
+    hits = np.asarray(S[iu] >= screen_threshold).nonzero()[0]
+    cand = []
+    blocked = 0
+    for h in hits:
+        i, j = int(iu[0][h]), int(iu[1][h])
+        if _forbid(i, j):
+            continue
+        if _forced_different(names[i], names[j]):    # ★判别词硬闸: 直接 DIFFERENT, 不进 LLM
+            blocked += 1
+            continue
+        cand.append((i, j))
+    # ② LLM 判同一(★防错合闸③: 反义默认 DIFFERENT)→ ③ 仅 SAME 进并查集
+    same_pairs = await _judge_same_pairs(llm, names, cand, concurrency)
+    groups = _union_pairs(len(cids), same_pairs)
+    # 算合并计划(canonical + 被并入), 报告always; ★dry_run 只算不落库
+    plan = []
+    for grp in groups:
+        members = [(cids[i], names[i]) for i in grp]
+        canonical = max(members, key=lambda m: (link_cnt.get(m[0], 0), -len(m[1])))
+        dups = [m for m in members if m[0] != canonical[0]]
+        plan.append((canonical, dups))
+    merged_total = sum(len(d) for _, d in plan)
+    group_report = [{"canonical": c[1], "merged": [d[1] for d in dups]} for c, dups in plan]
+    if not dry_run:
+        async with conn.transaction():
+            for (can_id, can_name), dups in plan:
+                dup_ids = [d[0] for d in dups]
+                await conn.execute(
+                    """INSERT INTO aii.ku_concept_onto(ku_id, concept_id)
+                       SELECT ku_id, $1 FROM aii.ku_concept_onto WHERE concept_id = ANY($2)
+                       ON CONFLICT DO NOTHING""", can_id, dup_ids)
+                await conn.execute(
+                    "UPDATE aii.concept_onto SET aliases = aliases || $1::jsonb WHERE concept_id = $2",
+                    json.dumps([d[1] for d in dups]), can_id)
+                d = await conn.fetchrow(
+                    """SELECT (array_agg(level) FILTER (WHERE level IS NOT NULL))[1] level,
+                              (array_agg(discipline) FILTER (WHERE discipline IS NOT NULL))[1] discipline,
+                              (array_agg(invariant_id) FILTER (WHERE invariant_id IS NOT NULL))[1] invariant_id
+                       FROM aii.concept_onto WHERE concept_id = ANY($1)""", dup_ids)
+                await conn.execute(
+                    """UPDATE aii.concept_onto SET level=COALESCE(level,$2), discipline=COALESCE(discipline,$3),
+                         invariant_id=COALESCE(invariant_id,$4) WHERE concept_id=$1""",
+                    can_id, d["level"], d["discipline"], d["invariant_id"])
+                await conn.execute("DELETE FROM aii.concept_onto WHERE concept_id = ANY($1)", dup_ids)
+
+    return {"before": len(cids), "after": len(cids) - (0 if dry_run else merged_total),
+            "would_merge" if dry_run else "merged": merged_total,
+            "candidates": len(cand), "hardgate_blocked": blocked, "dry_run": dry_run,
+            "groups": group_report}
+
+
 _INV_JUDGE_SYS = ("You judge whether two stated invariants describe the SAME underlying intrinsic law "
                   "(the same 道 / necessary tendency) — possibly across different domains or languages. "
                   "You only say same=true when the intrinsic law is genuinely the same. Output valid JSON only.")
