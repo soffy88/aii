@@ -370,7 +370,7 @@ async def kc_detail(kc_id: str):
                     "       k.substrate_id, s.title AS source_book "
                     "FROM aii.ku_onto k LEFT JOIN aii.ingested_substrate s ON k.substrate_id = s.substrate_id "
                     "WHERE k.ku_id = ANY($1::text[])",
-                    [str(s) for s in source_ids[:50]],
+                    [str(s) for s in source_ids[:200]],
                 )
 
         # 区分两种 KC: 按章(书内固定) vs 谱社区(跨书增长)
