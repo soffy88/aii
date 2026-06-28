@@ -1,11 +1,13 @@
-"""三通道管线 状态 + 控制(经济 key1 / 中文数学 key2 / 英文数学 key3).
-运行检测: 扫 /proc 看 AII_MD_FILE 含该通道书路径子串(进程都设了 AII_MD_FILE).
-入库数: DB ku_onto. 进度: 日志最后一行. 控制: start(detached) / stop(killpg).
+"""三通道飞轮 状态 + 控制(经济 key1 / 中文数学 key2 / 英文数学 key3).
+飞轮监控 /home/soffy/books/MD/{经济学,中文数学,英文数学} 的 *.md, 持续处理+入库.
+运行检测: 飞轮进程(flywheel_channel.sh <cid>)cmdline. 入库数: DB ku_onto + staging.
+控制: start(启飞轮)/stop(killpg).
 """
 import os
 import json
 import glob
 import signal
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -14,59 +16,39 @@ from fastapi import APIRouter, HTTPException
 
 router = APIRouter()
 ROOT = Path("/home/soffy/projects/AII")
-SHARE = "/home/soffy/shared/stratum-to-aii"
+MD_BASE = Path("/home/soffy/books/MD")
 DSN = os.getenv("DATABASE_URL", "postgresql://aii:aii_safe_pass@localhost:5435/aii_kg")
+_MAP = ROOT / "flywheel_queue/substrate_map.json"
+
+CHANNELS = {
+    "econ":    {"name": "经济学", "folder": "经济学", "key_id": "econ",
+                "log": ROOT / "econ_pipeline/run_mankiw.log"},
+    "math_zh": {"name": "中文数学", "folder": "中文数学", "key_id": "math_zh",
+                "log": ROOT / "math_pipeline/run_shida.log"},
+    "math_en": {"name": "英文数学", "folder": "英文数学", "key_id": "math_en",
+                "log": ROOT / "math_pipeline/run_calculus.log"},
+}
 
 
 def _keys() -> dict:
-    f = ROOT / ".pipeline_keys.json"
     try:
-        return json.loads(f.read_text())
+        return json.loads((ROOT / ".pipeline_keys.json").read_text())
     except Exception:
         return {}
 
 
-CHANNELS = {
-    "econ": {
-        "name": "经济学 · Mankiw《经济学原理》10e",
-        "key_id": "econ", "substrate": "mankiw_principles_econ_10e", "total": 38,
-        "match": "Principles of Economics 10e",
-        "log": ROOT / "econ_pipeline/run_mankiw.log",
-        "cmd": ["bash", "scripts/econ_pipeline.sh"],
-        "env": lambda k: {
-            "NVIDIA_NIM_API_KEY": k.get("econ", ""),
-            "SUBSTRATE": "mankiw_principles_econ_10e",
-            "AII_MD_FILE": f"{SHARE}/Principles of Economics 10e.md",
-            "ECON_TITLE": "Principles of Economics, 10e (Mankiw)",
-            "DATABASE_URL": DSN, "PIPELINE_CKPT_DIR": "econ_pipeline/ckpts",
-        },
-    },
-    "math_zh": {
-        "name": "中文数学 · 华东师大《数学分析》第5版上",
-        "key_id": "math_zh", "substrate": "shida_mathanalysis_v5_vol1", "total": 12,
-        "match": "数学分析",
-        "log": ROOT / "math_pipeline/run_shida.log",
-        "cmd": ["bash", "math_run_shida.sh"],
-        "env": lambda k: {"DATABASE_URL": DSN},
-    },
-    "math_en": {
-        "name": "英文数学 · Calculus Volume 1 (OpenStax)",
-        "key_id": "math_en", "substrate": "openstax_calculus_v1", "total": 6,
-        "match": "Calculus Volume 1",
-        "log": ROOT / "math_pipeline/run_calculus.log",
-        "cmd": ["bash", "math_run_en.sh"],
-        "env": lambda k: {
-            "NVIDIA_NIM_API_KEY": k.get("math_en", ""),
-            "AII_MD_FILE": f"{SHARE}/Calculus Volume 1.md",
-            "SUBSTRATE": "openstax_calculus_v1",
-            "MATH_TITLE": "Calculus Volume 1 (OpenStax)", "DATABASE_URL": DSN,
-        },
-    },
-}
+def _resolve(domain: str, stem: str) -> str:
+    """文件名 → substrate(与 flywheel_resolve.py 一致): 已知走 map, 否则 <domain>_<md5前10>."""
+    try:
+        m = json.loads(_MAP.read_text(encoding="utf-8"))
+    except Exception:
+        m = {}
+    if stem in m:
+        return m[stem]
+    return f"{domain}_{hashlib.md5(stem.encode('utf-8')).hexdigest()[:10]}"
 
 
 def _running_pids(cid: str) -> list[int]:
-    """飞轮进程检测: cmdline 含 'flywheel_channel.sh <cid>'(持续运转, sleep 时也算运行)."""
     pids = []
     for cl in glob.glob("/proc/[0-9]*/cmdline"):
         try:
@@ -81,15 +63,21 @@ def _running_pids(cid: str) -> list[int]:
     return pids
 
 
-def _staging_ku(substrate: str) -> int:
-    """数学 KU 先落 staging(json), register 后才进 DB; 统计 staging 里的 KU 数."""
+def _staging_ku(sub: str) -> int:
     total = 0
-    for f in glob.glob(str(ROOT / "math_pipeline/staging" / substrate / "ch*.json")):
+    for f in glob.glob(str(ROOT / "math_pipeline/staging" / sub / "ch*.json")):
         try:
             total += len(json.loads(open(f, encoding="utf-8").read()))
         except Exception:
             pass
     return total
+
+
+def _done_set(cid: str) -> set:
+    try:
+        return set((ROOT / f"flywheel_queue/{cid}.done").read_text().split())
+    except Exception:
+        return set()
 
 
 def _last_log(p: Path) -> str:
@@ -109,16 +97,25 @@ async def list_pipelines():
     try:
         out = []
         for cid, c in CHANNELS.items():
-            ku = await conn.fetchval(
-                "SELECT count(*) FROM aii.ku_onto WHERE substrate_id=$1", c["substrate"])
-            staged = _staging_ku(c["substrate"])
-            pids = _running_pids(cid)
+            folder = MD_BASE / c["folder"]
+            done = _done_set(cid)
+            books, total_ku = [], 0
+            for md in sorted(glob.glob(str(folder / "*.md"))):
+                stem = Path(md).stem
+                sub = _resolve(cid, stem)
+                ku = await conn.fetchval(
+                    "SELECT count(*) FROM aii.ku_onto WHERE substrate_id=$1", sub) or 0
+                staged = _staging_ku(sub)
+                ku_n = ku or staged
+                total_ku += ku_n
+                books.append({"title": stem, "substrate": sub, "ku": ku_n,
+                              "in_db": ku > 0, "done": sub in done})
             out.append({
-                "id": cid, "name": c["name"], "substrate": c["substrate"],
-                "total_chapters": c["total"], "ku_count": (ku or 0) or staged,
-                "in_db": (ku or 0) > 0, "staged_ku": staged,
-                "running": len(pids) > 0, "pids": pids,
+                "id": cid, "name": c["name"], "folder": str(folder),
+                "running": len(_running_pids(cid)) > 0,
                 "has_key": bool(_keys().get(c["key_id"])),
+                "books_total": len(books), "books_done": sum(1 for b in books if b["done"]),
+                "ku_count": total_ku, "books": books,
                 "last_log": _last_log(c["log"]),
             })
         return {"status": "ok", "data": out}
@@ -134,10 +131,9 @@ async def start_pipeline(cid: str):
     if _running_pids(cid):
         return {"status": "ok", "msg": "already running"}
     if not _keys().get(c["key_id"]):
-        raise HTTPException(400, f"通道 {cid} 未配置 NIM key(.pipeline_keys.json)")
+        raise HTTPException(400, f"通道 {cid} 未配置 NIM key")
     c["log"].parent.mkdir(parents=True, exist_ok=True)
     logf = open(c["log"], "ab")
-    # ★启动持续飞轮(不停运转: 处理队列→入库→sleep监视新书→循环). key 由飞轮自读.
     subprocess.Popen(["bash", "flywheel_channel.sh", cid], cwd=str(ROOT),
                      env={**os.environ, "DATABASE_URL": DSN},
                      stdout=logf, stderr=logf, start_new_session=True)
@@ -146,14 +142,12 @@ async def start_pipeline(cid: str):
 
 @router.post("/pipelines/{cid}/stop")
 async def stop_pipeline(cid: str):
-    c = CHANNELS.get(cid)
-    if not c:
+    if cid not in CHANNELS:
         raise HTTPException(404, "unknown channel")
     killed = []
     for pid in _running_pids(cid):
         try:
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
-            killed.append(pid)
+            os.killpg(os.getpgid(pid), signal.SIGKILL); killed.append(pid)
         except Exception:
             try:
                 os.kill(pid, signal.SIGKILL); killed.append(pid)
