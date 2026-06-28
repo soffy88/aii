@@ -342,17 +342,23 @@ def _parse_points(t: str) -> list:
 
 
 async def _plan(llm, text, n):
-    """规划仍喂全章(不截断); 额外为每个知识点定位 pos 供 _synth 用."""
-    chunks = [text] if len(text) <= _CTX else [text[i:i + _CTX] for i in range(0, len(text), _CTX)]
+    """规划分块喂(块大小适配 LLM prompt 上限); 额外为每个知识点定位 pos 供 _synth 用.
+    ★块大小=min(_CTX, OLLAMA_PROMPT_CHARS-余量): 本地模型(Ollama)按 OLLAMA_PROMPT_CHARS 截断,
+      若块>上限会被截断、且指令在文本后→指令被切掉→空规划. 故块要 fit 上限, 指令放最前."""
+    import os
+    _lim = int(os.getenv("OLLAMA_PROMPT_CHARS", str(_CTX)))
+    _ck = min(_CTX, max(8000, _lim - 2500))
+    chunks = [text] if len(text) <= _ck else [text[i:i + _ck] for i in range(0, len(text), _ck)]
     pts = []
     for ck in chunks:
         r = await llm(messages=[{"role": "user", "content":
-            f"Chapter {n} text (part):\n\n{ck}\n\n"
-            f"List ONLY the concepts this chapter DIRECTLY AND SUBSTANTIVELY teaches — "
+            # ★指令在前(防 Ollama 截断切掉指令), 章节文本在后
+            f"List ONLY the concepts the following chapter text DIRECTLY AND SUBSTANTIVELY teaches — "
             f"concepts with their own definition or ≥2 paragraphs of explanation. "
             f"EXCLUDE concepts merely mentioned in passing, used as 1-sentence examples, "
             f"or previewed/introduced for a later chapter. "
-            'JSON: {"points":[{"name":"..","type":"concept|principle|method"}]}'}],
+            'Output JSON: {"points":[{"name":"..","type":"concept|principle|method"}]}\n\n'
+            f"Chapter {n} text:\n\n{ck}"}],
             system=PLAN_SYS, max_tokens=700)
         t = "".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text")
         pts += _parse_points(t)

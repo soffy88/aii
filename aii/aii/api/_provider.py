@@ -2,9 +2,15 @@ import asyncio
 import concurrent.futures
 import os
 import logging
+import threading
 import httpx
 from obase import ProviderRegistry
 from oprim import vector_encode
+
+# ★全局 Ollama 串行锁: 本地单 GPU 一次只能可靠跑 1 个 gemma 请求; 并发请求会让 gemma4
+# 输出垃圾(如 '{"'). 管道多处 gather/Semaphore(synth=8, readout=∞, cross=5)对云端
+# DeepSeek 没事, 但对本地 Ollama 必须串行. 在 caller 层加锁, 不必改各步骤并发参数.
+_OLLAMA_CALL_LOCK = threading.Lock()
 
 logger = logging.getLogger(__name__)
 
@@ -77,19 +83,21 @@ def _make_ollama_caller(model: str = "qwen2.5:7b", base_url: str = "http://local
 
     def _call_sync(prompt: str) -> str:
         """KU 抽取用: format=json 强制结构化输出."""
-        resp = _client.post(
-            f"{base_url}/api/generate",
-            json={"model": model, "prompt": prompt[:_max_chars], "stream": False, "format": "json"},
-        )
+        with _OLLAMA_CALL_LOCK:  # ★串行: 单 GPU 并发会让 gemma 输出垃圾
+            resp = _client.post(
+                f"{base_url}/api/generate",
+                json={"model": model, "prompt": prompt[:_max_chars], "stream": False, "format": "json"},
+            )
         resp.raise_for_status()
         return resp.json()["response"]
 
     def _call_sync_plain(prompt: str) -> str:
         """合成/纯文本用: 不加 format=json, 直接返回自然语言."""
-        resp = _client.post(
-            f"{base_url}/api/generate",
-            json={"model": model, "prompt": prompt[:_max_chars], "stream": False},
-        )
+        with _OLLAMA_CALL_LOCK:  # ★串行: 单 GPU 并发会让 gemma 输出垃圾
+            resp = _client.post(
+                f"{base_url}/api/generate",
+                json={"model": model, "prompt": prompt[:_max_chars], "stream": False},
+            )
         resp.raise_for_status()
         return resp.json()["response"]
 
