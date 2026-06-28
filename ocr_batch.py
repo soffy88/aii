@@ -3,14 +3,15 @@
 """
 import os, re, sys, glob, time
 import fitz
+import numpy as np
 from collections import Counter
-from rapidocr_onnxruntime import RapidOCR
+import easyocr
 
 SRC = "/home/soffy/books/数学"
 MD_ZH = "/home/soffy/books/MD/中文数学"
 MD_EN = "/home/soffy/books/MD/英文数学"
 OTHER = "/home/soffy/books/MD"
-DPI = 180
+DPI = 170
 LOG = "/home/soffy/projects/AII/ocr_batch.log"
 
 def log(m):
@@ -30,7 +31,7 @@ def needs_ocr(path):
 def chapters(text):
     return len(re.findall(r'(?m)^#\s+Chapter\s+\d|第[一二三四五六七八九十百\d]+章|^Chapter\s+\d', text))
 
-ocr = RapidOCR()
+reader = easyocr.Reader(['ch_sim', 'en'], gpu=True, verbose=False)
 
 def ocr_pdf(path):
     d = fitz.open(path)
@@ -39,8 +40,11 @@ def ocr_pdf(path):
     for p in range(n):
         try:
             pix = d[p].get_pixmap(dpi=DPI)
-            res, _ = ocr(pix.tobytes("png"))
-            pages.append("\n".join(r[1] for r in res) if res else "")
+            img = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+            if pix.n == 4:
+                img = img[:, :, :3]
+            res = reader.readtext(img, detail=0, paragraph=True)
+            pages.append("\n".join(res) if res else "")
         except Exception:
             pages.append("")
         if (p + 1) % 50 == 0:
