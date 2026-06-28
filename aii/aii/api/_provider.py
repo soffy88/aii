@@ -15,7 +15,8 @@ _OLLAMA_CALL_LOCK = threading.Lock()
 logger = logging.getLogger(__name__)
 
 
-def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash") -> callable:
+def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash",
+                          base_url: str = "https://api.deepseek.com/chat/completions") -> callable:
     """Return an async callable compatible with both omodul (messages/system/max_tokens kwargs)
     and the legacy synthesis_engine (single positional prompt string via executor).
 
@@ -30,7 +31,7 @@ def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash") -> cal
     def _call_sync(prompt: str) -> str:
         """Synchronous DeepSeek call for synthesis (plain text, no JSON mode)."""
         resp = _client.post(
-            "https://api.deepseek.com/chat/completions",
+            base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={"model": model, "messages": [{"role": "user", "content": prompt}]},
         )
@@ -40,7 +41,7 @@ def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash") -> cal
     def _call_sync_json(prompt: str) -> str:
         """Synchronous DeepSeek call for extraction (JSON mode → eliminates markdown fence retries)."""
         resp = _client.post(
-            "https://api.deepseek.com/chat/completions",
+            base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             json={
                 "model": model,
@@ -137,7 +138,20 @@ def register_providers():
     api_key = os.getenv("DEEPSEEK_API_KEY")
     ProviderRegistry.register("llm", "deepseek-flash", _make_deepseek_caller(api_key, model="deepseek-v4-flash"))
     ProviderRegistry.register("llm", "deepseek-pro", _make_deepseek_caller(api_key, model="deepseek-v4-pro"))
-    if not use_ollama_as_default:
+
+    # ★NVIDIA NIM (云端 OpenAI 兼容; 快 + 可并发, 避开本地单 GPU 串行瓶颈, 无需 DeepSeek 余额).
+    #   设 NVIDIA_NIM_API_KEY 即作 default(优先于 DeepSeek); 模型经 NIM_MODEL 选(默认 llama-3.3-70b).
+    nim_key = os.getenv("NVIDIA_NIM_API_KEY")
+    use_nim = bool(nim_key) and not use_ollama_as_default
+    if nim_key:
+        nim_model = os.getenv("NIM_MODEL", "meta/llama-3.3-70b-instruct")
+        nim_caller = _make_deepseek_caller(nim_key, model=nim_model,
+                                           base_url="https://integrate.api.nvidia.com/v1/chat/completions")
+        ProviderRegistry.register("llm", "nim", nim_caller)
+        if use_nim:
+            ProviderRegistry.register("llm", "default", nim_caller)
+            logger.info("NVIDIA NIM registered as DEFAULT: %s", nim_model)
+    if not use_ollama_as_default and not use_nim:
         ProviderRegistry.register("llm", "default", _make_deepseek_caller(api_key, model="deepseek-v4-flash"))
 
     # 2. LLM Provider (Ollama) — low-trust sources OR local testing (ECON_LLM_PROVIDER=ollama)
