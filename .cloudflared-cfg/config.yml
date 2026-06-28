@@ -5,3 +5,6 @@ ingress:
   - hostname: aii.uex.hk
     service: http://localhost:3101
   - service: http_status:404
+# NOTE: this tunnel runs with `--token` → ingress is managed in the Cloudflare
+# dashboard, NOT this file. To proxy WebSocket, add a Public Hostname route in the
+# dashboard: aii.uex.hk  path=/ws  → http://localhost:9304 (before the :3101 rule).
