@@ -22,6 +22,10 @@ from obase import ProviderRegistry
 _CTX = 130000
 # ★定向窗口参数 — 每个 KU 合成只喂知识点所在小节, 不喂整章.
 _WIN_PRE        = 500    # 知识点 pos 前的 chars(标准路径)
+# ★★ 固化标识: 经济学管道程序端标准版本(随 econ_pipeline.sh econ-std-v1.1) ★★
+# v1.1: A定位优先真定义框+跳目录 / B窗口清脚注·URL·页码 / C-D WHAT骨架+例子去重(成熟)
+PIPELINE_VERSION = "econ-std-v1.1"
+
 _WIN_POST       = 20000  # 知识点 pos 后的 chars(标准路径)
 _WIN_FALLBACK   = 40000  # pos 未找到时 fallback
 # ★混合路径参数 — 程序提取了WHAT骨架后, LLM看WHY窗口

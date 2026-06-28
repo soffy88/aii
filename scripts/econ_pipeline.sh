@@ -36,14 +36,22 @@ PIPELINE_CKPT_DIR="${PIPELINE_CKPT_DIR:-econ_pipeline/ckpts}"
 mkdir -p "$QUAL_DIR" "$PIPELINE_CKPT_DIR"
 QUAL_JSON="$QUAL_DIR/${SUBSTRATE}.json"
 
-export SUBSTRATE AII_MD_FILE PIPELINE_CKPT_DIR
+# ★★★ 固化标识: 经济学管道标准版本 ★★★
+# v1.1 (2026-06-28): 在 v1.0(microecon_en_full_v2 验证)基础上, 固化"程序端WHAT升级":
+#   A 定位 _find_pos 优先真定义框 + 全程跳过目录条目(治本防误落目录)
+#   B 边界 _clean_window 清脚注/URL引文/孤立页码(治本防污染窗口)
+#   C/D 已成熟: 程序抓 定义框/例子/公式/图表标题/表格数据 + 例子去重+代表性排序
+#   分流: 程序抓 WHAT 骨架, gemma4(本地全GPU) 只补 WHY/HOW → 减 LLM 负担、降成本
+ECON_PIPELINE_VERSION="econ-std-v1.1"
+export SUBSTRATE AII_MD_FILE PIPELINE_CKPT_DIR ECON_PIPELINE_VERSION
 
 PY=.venv/bin/python
 
 echo "════════════════════════════════════════════"
-echo "★ 经济学管道: $ECON_TITLE"
+echo "★ 经济学管道 [$ECON_PIPELINE_VERSION]: $ECON_TITLE"
 echo "  SUBSTRATE=$SUBSTRATE"
 echo "  AII_MD_FILE=$AII_MD_FILE"
+echo "  LLM=${ECON_LLM_PROVIDER:-deepseek}${OLLAMA_MODEL:+ ($OLLAMA_MODEL)}"
 echo "  QUAL=$QUAL_JSON"
 echo "════════════════════════════════════════════"
 
