@@ -33,8 +33,12 @@ _WIN_FALLBACK   = 40000  # pos 未找到时 fallback
 _WIN_SKEL_DEF   = 0      # 从 pos 开始读(不跳过定义区, 防止"Let bygones"等引入段丢失)
 _WIN_POST_HYBRID = 9000  # 从 pos 起读 9K chars(比标准 20K 更小)
 
-PLAN_SYS = ("You identify the knowledge points a textbook chapter DIRECTLY AND SUBSTANTIVELY teaches. "
-            "Output valid JSON only.")
+PLAN_SYS = ("You identify the knowledge points a textbook chapter DIRECTLY AND SUBSTANTIVELY teaches, "
+            "classified by ontological type (conceptual / rationale / procedural / positional / factual). "
+            "★FAITHFUL TO THE TEXT (命门): for rationale, give ONLY the causal mechanism the text actually "
+            "states — never invent causation the text doesn't say. For positional, mark ONLY genuine disputes "
+            "the text presents — never turn a consensus principle into a 'dispute'. "
+            "Types reflect what the book really is — never force a type that isn't there. Output valid JSON only.")
 SYN_SYS = ("You synthesize ONE thorough KU by INTEGRATING the chapter's material. Use ONLY the chapter text. "
            "Cite [Ch{n}]. Write ONLY what IS substantively covered — skip any facet absent from this chapter "
            "(do NOT write placeholder text like 'not covered'). Integration not creation. Bilingual EN+中文. "
@@ -239,9 +243,20 @@ def _extract_skeleton(text: str, name: str, pos: int):
 
 
 def _facets(typ):
-    return {"concept": "WHAT(内涵essence/外延boundary/用处use), WHY(why true/important), HOW(how applied)",
-            "principle": "WHAT(meaning), WHY(rationale/evidence), IMPLICATION(what follows)",
-            "method": "WHAT, WHEN, HOW(steps), WHY"}.get(typ, "WHAT, WHY, HOW")
+    return {
+        # ── 六类各自的"面" ──
+        "conceptual": "WHAT(内涵essence/外延boundary/用处use), WHY(why true/important), HOW(how applied)",
+        "rationale":  "the MECHANISM / causal chain: WHY-it-is-so and HOW the causation works. "
+                      "★ONLY the causation the text EXPLICITLY states — never invent causation the text doesn't say.",
+        "procedural": "WHAT, WHEN(applicable conditions), HOW(steps), WHY",
+        "positional": "the CLAIM, its ARGUMENT, the OPPOSING stance(s). "
+                      "★ONLY a genuine dispute the text presents — never present a consensus principle as a dispute.",
+        "factual":    "the 5W: when / where / who / what happened / significance",
+        # ── 旧类型 back-compat(防历史调用) ──
+        "concept": "WHAT(内涵essence/外延boundary/用处use), WHY(why true/important), HOW(how applied)",
+        "principle": "WHAT(meaning), WHY(rationale/evidence), IMPLICATION(what follows)",
+        "method": "WHAT, WHEN, HOW(steps), WHY",
+    }.get(typ, "WHAT, WHY, HOW")
 
 
 def _not_toc(tl: str, start: int) -> bool:
@@ -355,13 +370,25 @@ async def _plan(llm, text, n):
     for ck in chunks:
         r = await llm(messages=[{"role": "user", "content":
             # ★指令在前(防 Ollama 截断切掉指令), 章节文本在后
-            f"List ONLY the concepts the following chapter text DIRECTLY AND SUBSTANTIVELY teaches — "
-            f"concepts with their own definition or ≥2 paragraphs of explanation. "
-            f"EXCLUDE concepts merely mentioned in passing, used as 1-sentence examples, "
-            f"or previewed/introduced for a later chapter. "
-            'Output JSON: {"points":[{"name":"..","type":"concept|principle|method"}]}\n\n'
+            "List the knowledge points this chapter text DIRECTLY AND SUBSTANTIVELY teaches "
+            "(each with its own definition or ≥2 paragraphs), classified by TYPE:\n"
+            "• conceptual: a concept / principle / law (what X is, what holds) — e.g. price elasticity, law of demand\n"
+            "• rationale: a WHY / mechanism the text EXPLICITLY explains (why something holds, the causal chain). "
+            "★Only the causation the text actually states — DO NOT invent causation the text doesn't say.\n"
+            "• procedural: a method / how-to (steps to do/compute something)\n"
+            "• positional: a CONTESTED claim with no settled truth (schools disagree) — give the holder. "
+            "★Only genuine disputes the text presents — DO NOT turn a consensus principle into a 'dispute'.\n"
+            "• factual: a specific verifiable fact (only if the text really states one)\n\n"
+            "★MAIN WHY (深度): for EACH conceptual point, IF the text explains why it holds / its mechanism, "
+            'ALSO add a rationale point with "explains":<that concept name>.\n'
+            "★ADMISSION GATE: cases / experiments / stories / examples are NOT points (they SUPPORT a point) — exclude them.\n"
+            "★TYPES REFLECT THE BOOK: a normal econ textbook is mostly conceptual/rationale/procedural; "
+            "positional/factual may be few or NONE — that is correct, NEVER force them.\n\n"
+            'Output JSON: {"points":[{"name":"..","type":"conceptual|rationale|procedural|positional|factual",'
+            '"explains":"<concept name — ONLY if type=rationale>",'
+            '"stance_holder":"<who holds it — ONLY if positional>","opposing":"<opposing stance — ONLY if positional>"}]}\n\n'
             f"Chapter {n} text:\n\n{ck}"}],
-            system=PLAN_SYS, max_tokens=700)
+            system=PLAN_SYS, max_tokens=1200)
         t = "".join(b.get("text", "") for b in r.get("content", []) if b.get("type") == "text")
         pts += _parse_points(t)
     # dedup by normalized name (单复数/大小写归一)

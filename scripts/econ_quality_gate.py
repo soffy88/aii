@@ -180,6 +180,19 @@ async def run():
         "SELECT count(*) FROM aii.bu_onto WHERE substrate_id=$1", SUB))
     metrics["BU已生成"] = "是" if has_bu else "否"
 
+    # ── ★六分类分布(深度命门: rationale≠0; 约束2: positional/factual有才抽, 不强凑) ──
+    type_rows = await conn.fetch(
+        "SELECT knowledge_type, count(*) n FROM aii.ku_onto WHERE substrate_id=$1 GROUP BY 1 ORDER BY 2 DESC", SUB)
+    type_dist = {r["knowledge_type"]: r["n"] for r in type_rows}
+    metrics["六分类分布"] = type_dist
+    rationale_n = type_dist.get("rationale", 0)
+    top_share = (max(type_dist.values()) / max(ku_total, 1)) if type_dist else 1.0
+    metrics["最大类占比%"] = round(100 * top_share)
+    # explains 边(rationale→概念, 深度进图)
+    explains_n = await conn.fetchval(
+        "SELECT count(*) FROM aii.concept_readout_edge WHERE substrate_id=$1 AND relation_type='explains'", SUB) or 0
+    metrics["explains边(深度)"] = explains_n
+
     # ── 章级 KU 分布 ──
     ch_rows = await conn.fetch(
         "SELECT (provenance->>'chapter')::int AS ch, count(*) AS n"
@@ -261,6 +274,17 @@ async def run():
 
     if not has_bu:
         alarms.append("BU未生成(书级理解缺失)")
+
+    # ★深度命门: rationale≠0(主动抽why没生效=没深度) + 单类不独吞(>95%=退回概念-only)
+    if ku_total > 0 and rationale_n == 0:
+        alarms.append("rationale(why)=0: 深度缺失(主动抽why未生效, 退回概念-only)")
+    if top_share > 0.95 and ku_total > 20:
+        alarms.append(f"单类独吞{round(100*top_share)}%>95%(没拆why/论断, 退回概念-only)")
+    # explains 边阈值(深度进图; 不足→提示, 非硬报警, 因 readout 可能用 deepseek 受余额限制)
+    explains_floor = max(5, round(rationale_n * 0.5))
+    if rationale_n > 0 and explains_n < explains_floor:
+        warnings.append(f"explains边{explains_n}<{explains_floor}(rationale未连到概念, 深度未进图)")
+    # ★约束2: positional/factual 缺失不报警(经济书有才抽); 仅记录分布供人工看
 
     # ── 输出 ──
     result = {

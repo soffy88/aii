@@ -4,7 +4,9 @@ SUB=os.getenv('SUBSTRATE','microecon_en_full_v2'); KEY=os.getenv('DEEPSEEK_API_K
 SYS=("Read out ONLY the directed relations this knowledge unit's text EXPLICITLY expresses "
      "(text directly describes them; exclude quoted/inferred). Types: "
      "prerequisite (A must be understood/exist before B), subsumes (A includes B as part/type), "
-     "derives (A leads to/produces/implies B). src/dst named in text. "
+     "derives (A leads to/produces/implies B), "
+     "explains (A is the why/mechanism behind B — A explains why B holds). "
+     "★explains ONLY when the text gives a real causal mechanism, never invent one. src/dst named in text. "
      'Output JSON {"rels":[{"src":"..","dst":"..","type":".."}]}. None->{"rels":[]}. '
      '★ Name src/dst concepts in the SAME language as the Concept title (中文 if title is Chinese).')
 async def call(cli, k, tries=3):
@@ -19,7 +21,7 @@ async def call(cli, k, tries=3):
                                headers={"Authorization":"Bearer "+KEY}, json=payload)
             j = json.loads(r.json()["choices"][0]["message"]["content"])
             return [x for x in j.get('rels',[]) if x.get('src') and x.get('dst')
-                    and x.get('type') in ('prerequisite','subsumes','derives') and x['src']!=x['dst']]
+                    and x.get('type') in ('prerequisite','subsumes','derives','explains') and x['src']!=x['dst']]
         except Exception:
             await asyncio.sleep(2)
     return None
