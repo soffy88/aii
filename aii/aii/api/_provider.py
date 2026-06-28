@@ -16,7 +16,8 @@ logger = logging.getLogger(__name__)
 
 
 def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash",
-                          base_url: str = "https://api.deepseek.com/chat/completions") -> callable:
+                          base_url: str = "https://api.deepseek.com/chat/completions",
+                          rpm: float = 0) -> callable:
     """Return an async callable compatible with both omodul (messages/system/max_tokens kwargs)
     and the legacy synthesis_engine (single positional prompt string via executor).
 
@@ -28,8 +29,26 @@ def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash",
     """
     _client = httpx.Client(trust_env=False, timeout=120)
 
+    # ★全局限流: NVIDIA NIM 免费层 40 req/min. rpm>0 时所有并发调用排队, 间隔 60/rpm 秒,
+    #   防 readout(无限并发)等步骤爆 429. 给每个调用分配一个时间槽, 锁外 sleep.
+    _min_int = (60.0 / rpm) if rpm else 0.0
+    _rl_lock = threading.Lock()
+    _rl_next = [0.0]
+
+    def _throttle() -> None:
+        if not _min_int:
+            return
+        import time as _t
+        with _rl_lock:
+            start = max(_t.monotonic(), _rl_next[0])
+            _rl_next[0] = start + _min_int
+        w = start - _t.monotonic()
+        if w > 0:
+            _t.sleep(w)
+
     def _call_sync(prompt: str) -> str:
         """Synchronous DeepSeek call for synthesis (plain text, no JSON mode)."""
+        _throttle()
         resp = _client.post(
             base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -40,6 +59,7 @@ def _make_deepseek_caller(api_key: str, model: str = "deepseek-v4-flash",
 
     def _call_sync_json(prompt: str) -> str:
         """Synchronous DeepSeek call for extraction (JSON mode → eliminates markdown fence retries)."""
+        _throttle()
         resp = _client.post(
             base_url,
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -145,8 +165,10 @@ def register_providers():
     use_nim = bool(nim_key) and not use_ollama_as_default
     if nim_key:
         nim_model = os.getenv("NIM_MODEL", "meta/llama-3.3-70b-instruct")
+        nim_rpm = float(os.getenv("NIM_RPM", "36"))  # NIM 免费层 40/min, 留余量
         nim_caller = _make_deepseek_caller(nim_key, model=nim_model,
-                                           base_url="https://integrate.api.nvidia.com/v1/chat/completions")
+                                           base_url="https://integrate.api.nvidia.com/v1/chat/completions",
+                                           rpm=nim_rpm)
         ProviderRegistry.register("llm", "nim", nim_caller)
         if use_nim:
             ProviderRegistry.register("llm", "default", nim_caller)
