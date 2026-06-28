@@ -90,11 +90,15 @@ aii.hyperedge (
 aii.hyperedge_member (
   hyperedge_id  bigint NOT NULL,          -- FK hyperedge
   concept_id    bigint NOT NULL,          -- FK concept_onto(被解释的概念=实体)
+  status        text  NOT NULL DEFAULT 'confirmed',  -- ★confirmed(内核同机制+原文依据) | candidate(相似存疑,待确认)
+  evidence      jsonb,                     -- ★原文依据(原文真说"这机制解释这概念"的出处)
+  cross_disc    bool  DEFAULT false,       -- ★是否跨学科扩入(跨学科判据更严,先 candidate)
   source_ku_id  text,                     -- 哪条KU surface了这条成员(溯源)
   added_at      timestamptz DEFAULT now(),
   PRIMARY KEY (hyperedge_id, concept_id)
 )
 ```
+> `status` 是"宁缺毋附会"的落地:**确信同机制+原文依据 → confirmed(进网络);存疑 → candidate(进候选池,不污染主网,等确证)。** 跨学科扩入一律先 candidate(§3.4 ⑤)。
 
 > 完全是 HyperGraphRAG 的二部结构:`hyperedge` = 超边节点(带 NL 描述 + 向量),`hyperedge_member` = 超边↔概念实体的关联。**新增表,现有 ku_onto/concept_onto/ku_concept_onto/edge_onto/directed_edge_v2 一律不动。**
 
@@ -103,19 +107,35 @@ aii.hyperedge_member (
 - rationale 联合解释多个 → 多行(n>1)。
 - **同一结构,同一查询路径**。不需要"单概念走二元边、多概念走超边"的分叉——n元就是统一形态。
 
-### 3.4 ★动态生长(有机体载体)
-新书/新章发现**同一机制**还解释别的概念时,**给已有超边加成员**,而非新建:
+### 3.4 ★动态生长 = 超边的本性(不暂缓,Phase 2 核心)
+
+**explains 超边的灵魂 = 机制不变、被解释概念集随知识摄入而生长。** 一条不会生长的超边 = 静态 n元边,失去有机体意义。所以动态生长**不是 Phase 3 增量,是超边的本性,Phase 2 必须一起做**。
+
+新书/新章发现**同一机制**还解释别的概念 → 给已有超边**加成员**(机制 canonical,成员集生长),而非新建。
+
+**★但"何时判同一机制"的生长判据,要像本性判据一样严**(本性不是表面相似算数,要内核结构同、经得起变换):
 
 ```
-机制匹配(同一 head 概念 + nl_description 语义相似 ≥ 阈值)
-  → 命中已有 hyperedge H
-  → INSERT hyperedge_member(H, 新概念)   # 机制不变, 被解释集扩大
-  → H.evidence 追加新来源
-未命中 → 新建 hyperedge
+生长判据(给已有超边扩成员前, 必须全过):
+ ① ★不是 nl_description 相似就合并 —— 表面相似 ≠ 同一机制
+ ② 要"内核是同一个机制 / 同一推理结构" —— 不只表述像, 是机制本身同
+    (同样的因果结构、同样的"之所以如此", 不是名字/措辞撞)
+ ③ 加的成员必须有原文依据(source_ku_id + evidence: 原文真说"这机制解释这概念")
+ ④ ★存疑的(相似但不确定同机制)→ 不自动合并, 标 status='candidate',
+    进候选池等人工确认 / 更多证据 —— 宁缺毋附会
+ ⑤ ★跨学科扩成员尤其严: 经济的"可替代性"和生物的"可替代性"真是同一机制吗?
+    要内核真同(同一不变结构), 不是名字/表述像就连; 跨学科一律先 candidate
 ```
 
-> 对齐 HyperGraphRAG 的 `_merge_nodes`:概念(实体)canonical,机制(超边)累积成员。**这是"机制解释力随知识库生长而扩张"的载体**——经济书里"可替代性"解释需求弹性,等生物书进来发现"可替代性"也解释生态位竞争强度 → 同一机制超边扩成员,跨学科联结涌现。
-> **Phase 化**:初版可"一 rationale 一超边"(n小),动态合并(跨章/跨书长成员)作为 Phase 3 增量,不阻塞先跑通。
+> 对齐 HyperGraphRAG 的 `_merge_nodes`(实体 canonical 合并)——但 AII 把"合并判据"提到**本性判据的严度**:**生长是本性(积极扩),不附会是命门(严判据)——靠严判据统一,不靠暂缓。** 真同机制就长,存疑的进 candidate 池等确证。
+
+### 3.4b ★宁缺毋附会机制(对齐本性的"宁标未发现")
+像本性"抽不到留空、绝不造假"一样,生长也"宁缺毋附会":
+
+- **确信同一机制**(内核同 + 原文依据)→ status=confirmed,扩成员(生长)。
+- **存疑**(相似但不确定同机制)→ status=candidate,**不自动并入主网**,等人工确认 / 积累更多证据再定。
+- **★假联结(附会)比漏联结危险**:跨学科涌现"看起来惊艳"最易诱人附会——但必须真。漏一条联结只是暂时没连上(以后还能补);连一条假联结会污染整张本性网,且"看起来对"最难被发现。
+- candidate 池是缓冲:积极发现候选,但**只有经得起严判据的才进 confirmed 主网**。
 
 ### 3.5 和现有三套的协调(不分裂)
 | 结构 | 语义 | explains 超边的关系 |
@@ -135,6 +155,21 @@ aii.hyperedge_member (
 - 动态生长加成员时,**新成员也要有原文依据**(source_ku_id + evidence),不靠"看起来相关"硬连。
 - grade 一律 unverified(机制是否真成立、解释是否真对,留确证机制),LLM 不标可信度。
 
+### 3.8 ★本性浮现路径(AII 独有,HyperGraphRAG 没有)
+有向超边的动态生长,是 AII 通向"本性(invariant)"的路径——这是 HyperGraphRAG 不具备的延伸:
+
+```
+有向超边动态生长
+  → 一条机制超边的成员跨多学科积累(经济弹性 / 生态位竞争 / 信息冗余…)
+  → 当成员形式各异、内核却是同一个机制(同一不变结构)
+  → 逼近一个【本性 invariant】(穿透各学科表象的不变内核)
+```
+
+- **这解了"本性为时尚早"的死结**:之前说本性"要跨学科数据才能提",而**超边生长正是积累"跨学科同机制"证据的载体**——每条机制超边跨学科扩一个 confirmed 成员,就多一份"这是同一不变结构"的证据。
+- **与本性体系接通**(CONCEPT-STORAGE/NATURE-EXTRACT):一条机制超边的成员若跨 ≥2 学科且内核同(经严判据 confirmed)→ 该机制的 invariant 浮现 → 凝结 invariant_concept,各学科概念经"本性同源"相连。
+- **★HyperGraphRAG 没有这个**:它的超边无向、静态、无本性追求(只为 RAG 检索)。AII 把超边做成**有向 + 动态生长 + 严判据**,才把它变成本性浮现的载体——这是 AII 区别于一切现成 RAG 的地方。
+- **本性提取仍审慎**:够多跨学科同机制证据(confirmed,非 candidate)+ 严判据,才提 invariant;不够就留在超边层继续长。**路径由超边生长打通,门槛由严判据把守。**
+
 ---
 
 ## 四、工程量 + 分步路径
@@ -147,17 +182,20 @@ aii.hyperedge_member (
 | 数据模型 | 新建 hyperedge + hyperedge_member(+ hyperedge_vdb)| 小(DDL)|
 | 抽取 | `chapter_synthesize._plan`:explains 字段 单概念→**概念列表**;`synthesize_book.persist`:写 hyperedge+members(替掉我 v1.3 误写的 concept_readout_edge)| 中 |
 | 质量门 | `econ_quality_gate`:explains 边数 → **explains 超边数 + 成员数 + 平均元数** | 小 |
-| 动态生长 | 新增 merge 步(机制匹配→扩成员)| 中(可 Phase 3 延后)|
-| 检索/前端 | HyperGraphRAG 式超边检索 + 概念页机制网展示 | 中(可 Phase 4)|
+| 动态生长 | merge 步(严判据:内核同机制→confirmed扩 / 存疑→candidate)| 中(**Phase 2 核心,不延后**)|
+| 检索/前端 | HyperGraphRAG 式超边检索 + 概念页机制网 + candidate 确认界面 | 中(Phase 3)|
 
 ### 4.2 分步路径
-1. **Phase 1 数据模型**:建 hyperedge + hyperedge_member 表(+ 向量列)。DDL by CC。
-2. **Phase 2 抽取落超边**:_plan 的 explains→列表;persist 写超边+成员(n元,初版一 rationale 一超边)。撤掉 v1.3 误写 concept_readout_edge 的 explains。
-3. **Phase 3 动态生长**:跨章/跨书机制匹配 → 扩成员(有机体生长)。
-4. **Phase 4 检索+前端**:超边向量检索 + 概念页机制网。
+1. **Phase 1 数据模型**:建 hyperedge + hyperedge_member(含 status/evidence/cross_disc + 向量列)。DDL by CC。
+2. **Phase 2 抽取落超边 + ★动态生长(含严判据)**:
+   - _plan 的 explains→**概念列表**;persist 写超边 + 成员(n元)。
+   - ★动态生长(本性,不延后):跨章/跨书同机制 → 严判据(内核同 + 原文依据)→ confirmed 扩成员;存疑 → candidate。
+   - 撤掉 v1.3 误写 concept_readout_edge 的 explains。
+3. **Phase 3 检索 + 前端**:超边向量检索(HyperGraphRAG 式)+ 概念页机制网 + candidate 池人工确认界面。
+4. **Phase 4 本性接通**:跨学科 confirmed 成员够多 → invariant 浮现 → 接 converge_invariants / invariant_concept(对齐 NATURE-EXTRACT)。
 5. **迁移**:数学管道 edge_onto 里已有的 explains 二元边 → 转成超边(每条二元 = n=1 超边),统一到超边层。
 
-> **全量前定对**:Phase 1+2 在 Mankiw/微观一本验证(explains 超边抽出、成员忠于原文、n=1/n>1 都对)→ 成立再上飞轮全量。
+> **全量前定对**:Phase 1+2 在 Mankiw/微观一本验证——① n元超边抽出、成员忠于原文(单本内);② ★动态生长跨章扩成员**判据严否**(真同机制才 confirmed,存疑 candidate);③ 抽查扩的成员:**原文真支持否(没附会假联结)**。三项过 → 再上飞轮全量。
 
 ---
 
@@ -165,10 +203,13 @@ aii.hyperedge_member (
 1. explains = **有向 n元超边**(rationale→{概念集合}),不拆二元——知识本相 + 生长载体。
 2. **二部结构对齐 HyperGraphRAG**:hyperedge(带NL描述+向量)+ hyperedge_member(关联),新增不动现有。
 3. **n元统一 n=1**:同结构同查询,不分叉。
-4. **动态生长**:机制 canonical,被解释概念集随摄入扩(对齐 `_merge_nodes`),跨学科联结涌现的载体。
-5. **三层协调**:超边层(n元 explains)/ 二元层(edge_onto 其余)/ 概念结构层(directed_edge_v2),不重复不分裂。
-6. **忠于原文**:成员只标原文真表达的解释关系,不附会;grade unverified。
-7. **增量路径**:Phase 1-2 先跑通验证,3-4 增量;先出本设计供审,**不急改代码**。
+4. **★动态生长是超边的本性(不暂缓,Phase 2 核心)**:机制 canonical,被解释概念集随摄入扩;不会长的超边失去有机体意义。
+5. **★生长判据像本性判据一样严**:内核同机制才扩(非表面相似)、要原文依据、存疑标 candidate 不自动并入、跨学科尤其严——**生长积极(本性)+ 不附会(命门),靠严判据统一,不靠暂缓**。
+6. **★宁缺毋附会**:假联结比漏联结危险(污染本性网且难发现);confirmed 才进主网,存疑进 candidate 池等确证。
+7. **★本性浮现路径(AII 独有)**:超边跨学科生长 → 积累"跨学科同机制"证据 → 本性浮现;HyperGraphRAG 无此(它无向/静态/无本性追求)。
+8. **三层协调**:超边层(n元 explains)/ 二元层(edge_onto 其余)/ 概念结构层(directed_edge_v2),不重复不分裂。
+9. **忠于原文**:成员只标原文真表达的解释关系,不附会;grade unverified。
+10. **增量路径**:Phase 1-2(含动态生长+严判据)先跑通验证,3-4 增量;先出本设计供审,**不急改代码**。
 
 ---
 
