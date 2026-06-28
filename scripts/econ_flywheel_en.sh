@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # ★程序化英文经济学飞轮 — 自动循环: 发现书→检MD→反馈Stratum→跑管道→入库/隔离
+# ★程序化 = WHAT 部分由【程序】抽取(_extract_skeleton: 定义框/例子/公式/图表标题/表格数据),
+#   不是 LLM 抽 WHAT; LLM 只负责【规划知识点】+ 补【WHY/HOW】。这是本飞轮的根本标识。
 # (复制自 econ_flywheel.sh，待升级为英文经济学专用；原始 econ_flywheel.sh 不动)
 #
 # 流程:
