@@ -24,12 +24,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PY=.venv/bin/python
-FLYWHEEL_STATE="econ_pipeline/flywheel_state.json"
-FLYWHEEL_BOOK_LIST="econ_pipeline/flywheel_booklist.txt"
-FLYWHEEL_REPORT="econ_pipeline/flywheel_report.json"
-FLYWHEEL_LOG="econ_pipeline/flywheel.log"
+# ★英文经济学飞轮: 独立 _en 状态/书单/报告(与原始 econ_flywheel 不冲突)
+FLYWHEEL_STATE="econ_pipeline/flywheel_en_state.json"
+FLYWHEEL_BOOK_LIST="econ_pipeline/flywheel_en_booklist.txt"
+FLYWHEEL_REPORT="econ_pipeline/flywheel_en_report.json"
+FLYWHEEL_LOG="econ_pipeline/flywheel_en.log"
 ECON_LIMIT="${ECON_LIMIT:-20}"
-STRATUM_FEEDBACK="${ECON_STRATUM_FEEDBACK:-1}"
+STRATUM_FEEDBACK="${ECON_STRATUM_FEEDBACK:-0}"   # 英文书来自本地文件夹, 默认不反馈Stratum
+
+# ★NIM key(免费) + DB + BGE-M3跑CPU(不抢aii-api的GPU)
+export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('econ',''))" 2>/dev/null)"
+export DATABASE_URL="${DATABASE_URL:-postgresql://aii:aii_safe_pass@localhost:5435/aii_kg}"
+export CUDA_VISIBLE_DEVICES=""
 
 mkdir -p econ_pipeline
 
@@ -45,11 +51,12 @@ echo "════════════════════════�
 echo ""
 
 # ── Step 1: 发现未处理的经济书 ──
-echo "[1/4] 发现未处理的经济金融书..."
+echo "[1/4] 发现未处理的【英文】经济书(books/MD/经济学 筛英文)..."
 LIMIT_ARG=""
 [ "$ECON_LIMIT" -gt 0 ] 2>/dev/null && LIMIT_ARG="--limit $ECON_LIMIT"
-$PY scripts/econ_discover.py \
+$PY scripts/econ_discover_en.py \
     --out "$FLYWHEEL_BOOK_LIST" \
+    --state "$FLYWHEEL_STATE" \
     --verbose \
     $LIMIT_ARG
 
