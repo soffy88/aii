@@ -32,9 +32,9 @@ FLYWHEEL_REPORT="math_pipeline/flywheel_zh_report.json"
 FLYWHEEL_LOG="math_pipeline/flywheel_zh.log"
 MATH_LIMIT="${MATH_LIMIT:-10}"
 
-# ★中文应有清单(默认 math_should_have: 定义/定理, 不设MATH_LANG) + NIM key(用econ闲置key,
-#   英文econ近完成; math_zh被中文econ占/math_en被英文数学占) + DB + BGE-M3跑CPU(不抢GPU)
-export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('econ',''))" 2>/dev/null)"
+# ★中文应有清单(默认 math_should_have: 定义/定理, 不设MATH_LANG) + NIM key(math_zh2 专属,
+#   4飞轮各自独立: 英文econ=econ/中文econ=math_zh/英文math=math_en/中文math=math_zh2) + BGE-M3跑CPU
+export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('math_zh2',''))" 2>/dev/null)"
 export DATABASE_URL="${DATABASE_URL:-postgresql://aii:aii_safe_pass@localhost:5435/aii_kg}"
 export CUDA_VISIBLE_DEVICES=""
 
