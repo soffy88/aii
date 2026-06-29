@@ -62,7 +62,8 @@ async def synth_chapter(llm, n):
 
 async def persist(conn, n, kus):
     loop = asyncio.get_event_loop()
-    explains_rows = []   # (ku_id, rationale名, 它解释的概念名) → 写 explains 边
+    # ★双仓: A仓只抽原始KU不建关系. explains 链留在 KU 的 provenance(下方 prov["explains"]),
+    #   explains 超边由 B仓 从 provenance 建(关系=B仓). A仓 不写 explains 边.
     for i, (p, body) in enumerate(kus):
         name = p["name"]; typ = p.get("type", "conceptual")
         en_raw, zh_raw = _split_bilingual(body)
@@ -91,16 +92,7 @@ async def persist(conn, n, kus):
                 provenance=EXCLUDED.provenance, embedding=EXCLUDED.embedding""",
             ku_id, SUB, name[:200], en or zh, zh,
             kt, stance, opposing, json.dumps(prov), emb)
-        if kt == "rationale" and p.get("explains"):     # ★主动抽why → explains 边(rationale→概念)
-            explains_rows.append((ku_id, name[:120], str(p["explains"])[:120]))
-    # ★写 explains 边到 concept_readout_edge(深度进图; 表/约束不接受则跳过, explains 已留在 provenance)
-    for ku_id, src, dst in explains_rows:
-        try:
-            await conn.execute(
-                "INSERT INTO aii.concept_readout_edge (substrate_id, ku_id, src_name, dst_name, relation_type)"
-                " VALUES ($1,$2,$3,$4,'explains')", SUB, ku_id, src, dst)
-        except Exception:
-            pass
+        # explains 链已写入 prov["explains"](上方) → B仓据此建 explains 超边; A仓不写边.
 
 
 async def main():
