@@ -32,8 +32,8 @@ FLYWHEEL_LOG="econ_pipeline/flywheel_zh.log"
 ECON_LIMIT="${ECON_LIMIT:-20}"
 STRATUM_FEEDBACK="${ECON_STRATUM_FEEDBACK:-0}"   # 中文书来自本地文件夹, 默认不反馈Stratum
 
-# ★NIM key(用 math_zh 闲置key, 避开正跑的英文econ占用econ key) + DB + BGE-M3跑CPU(不抢GPU)
-export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('math_zh',''))" 2>/dev/null)"
+# ★NIM key(econ_zh 专属, 4飞轮各自独立: econ/econ_zh/math_en/math_zh) + DB + BGE-M3跑CPU(不抢GPU)
+export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('econ_zh',''))" 2>/dev/null)"
 export DATABASE_URL="${DATABASE_URL:-postgresql://aii:aii_safe_pass@localhost:5435/aii_kg}"
 export CUDA_VISIBLE_DEVICES=""
 
