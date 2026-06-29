@@ -80,17 +80,17 @@ async def persist(conn, n, kus):
         prov = {"chapter": n, "paradigm": "thorough-synthesis", "marker": "AII综合-讲透,非原文逐字",
                 "type": typ, "explains": p.get("explains"),    # ★溯源记真实六类 + explains指向
                 "citations": sorted(set(en_cites + zh_cites))}
+        # ★is_positional 是生成列(=knowledge_type='positional'), 不可显式插入; 只写 stance_holder/opposing_stance
         await conn.execute("""
             INSERT INTO aii.ku_onto (ku_id, substrate_id, title, natural_text, natural_text_zh,
-                knowledge_type, is_positional, stance_holder, opposing_stance, grade, provenance, embedding)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'unverified',$10,$11)
+                knowledge_type, stance_holder, opposing_stance, grade, provenance, embedding)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'unverified',$9,$10)
             ON CONFLICT (ku_id) DO UPDATE SET natural_text=EXCLUDED.natural_text,
                 natural_text_zh=EXCLUDED.natural_text_zh, knowledge_type=EXCLUDED.knowledge_type,
-                is_positional=EXCLUDED.is_positional, stance_holder=EXCLUDED.stance_holder,
-                opposing_stance=EXCLUDED.opposing_stance,
+                stance_holder=EXCLUDED.stance_holder, opposing_stance=EXCLUDED.opposing_stance,
                 provenance=EXCLUDED.provenance, embedding=EXCLUDED.embedding""",
             ku_id, SUB, name[:200], en or zh, zh,
-            kt, is_pos, stance, opposing, json.dumps(prov), emb)
+            kt, stance, opposing, json.dumps(prov), emb)
         if kt == "rationale" and p.get("explains"):     # ★主动抽why → explains 边(rationale→概念)
             explains_rows.append((ku_id, name[:120], str(p["explains"])[:120]))
     # ★写 explains 边到 concept_readout_edge(深度进图; 表/约束不接受则跳过, explains 已留在 provenance)
