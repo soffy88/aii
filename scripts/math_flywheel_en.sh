@@ -25,11 +25,18 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PY=.venv/bin/python
-FLYWHEEL_STATE="math_pipeline/flywheel_state.json"
-FLYWHEEL_BOOK_LIST="math_pipeline/flywheel_booklist.txt"
-FLYWHEEL_REPORT="math_pipeline/flywheel_report.json"
-FLYWHEEL_LOG="math_pipeline/flywheel.log"
+# ★英文数学飞轮: 独立 _en 状态/书单/报告(与原始 math_flywheel 不冲突)
+FLYWHEEL_STATE="math_pipeline/flywheel_en_state.json"
+FLYWHEEL_BOOK_LIST="math_pipeline/flywheel_en_booklist.txt"
+FLYWHEEL_REPORT="math_pipeline/flywheel_en_report.json"
+FLYWHEEL_LOG="math_pipeline/flywheel_en.log"
 MATH_LIMIT="${MATH_LIMIT:-10}"
+
+# ★英文应有清单(Definition/Theorem) + NIM key(math_en,免费) + DB + BGE-M3跑CPU(不抢GPU)
+export MATH_LANG=en
+export NVIDIA_NIM_API_KEY="$($PY -c "import json;print(json.load(open('.pipeline_keys.json')).get('math_en',''))" 2>/dev/null)"
+export DATABASE_URL="${DATABASE_URL:-postgresql://aii:aii_safe_pass@localhost:5435/aii_kg}"
+export CUDA_VISIBLE_DEVICES=""
 
 mkdir -p math_pipeline
 
@@ -44,12 +51,13 @@ echo "  LIMIT=$MATH_LIMIT  DRY_RUN=${MATH_DRY_RUN:-0}"
 echo "════════════════════════════════════════════════════"
 echo ""
 
-# ── Step 1: 发现未处理的数学书 ──
-echo "[1/4] 发现未处理的数学书..."
+# ── Step 1: 发现未处理的【英文】数学书 ──
+echo "[1/4] 发现未处理的【英文】数学书(books/MD/英文数学)..."
 LIMIT_ARG=""
 [ "$MATH_LIMIT" -gt 0 ] 2>/dev/null && LIMIT_ARG="--limit $MATH_LIMIT"
-$PY scripts/math_discover.py \
+$PY scripts/math_discover_en.py \
     --out "$FLYWHEEL_BOOK_LIST" \
+    --state "$FLYWHEEL_STATE" \
     --verbose \
     $LIMIT_ARG
 

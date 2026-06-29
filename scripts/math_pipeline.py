@@ -1,5 +1,9 @@
 """数学专门管道: 应有清单(定义/定理/概念)驱动讲透→数学打磨→完整性自检→质量门. 不入正式库, 出实物.
-★关键: 讲透由确定性应有清单驱动(每知识点一KU), 不靠LLM规划(那会漏). 公式完整=命门."""
+★关键: 讲透由确定性应有清单驱动(每知识点一KU), 不靠LLM规划(那会漏). 公式完整=命门.
+★★固化标识: 数学 A仓 KU 抽取标准 math-A仓-v1(2026-06-29) — 双仓A仓=纯抽取(should_have确定性
+   定义/定理/公式驱动→逐章讲透→质量门content_match/公式≥80%/facet). 本就无readout/KC/BU(已A仓).
+   MATH_LANG=en→英文应有清单. slice_chapter支持 第N章 与 # Chapter N(冒号可选)."""
+MATH_PIPELINE_VERSION = "math-A仓-v1"
 import asyncio, os, json, re, sys, httpx
 from pathlib import Path
 
@@ -28,9 +32,9 @@ def slice_chapter(text, n):
         if '…' in line or re.search(r'\s\d+\s*$', line): continue
         num = _cn2int(m.group(1))
         if num and num not in starts: starts[num] = m.start()
-    # 英文格式 fallback
+    # 英文格式 fallback(冒号可选: '# Chapter 1:' 或 '# Chapter 1')
     if not starts:
-        for m in re.finditer(r'(?m)^#\s+Chapter\s+(\d+):', text):
+        for m in re.finditer(r'(?m)^#\s+Chapter\s+(\d+):?\s*$', text):
             starts[int(m.group(1))] = m.start()
     if n not in starts:
         raise SystemExit(f"chapter {n} not found; have {sorted(starts)}")

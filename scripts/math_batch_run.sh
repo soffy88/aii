@@ -141,6 +141,8 @@ for m in re.finditer(r'(?m)^第([一二三四五六七八九十]+)章', text):
     if '…' in line or re.search(r'\s\d+\s*$', line): continue
     n = _cn2int(m.group(1))
     if n: chapters.add(n)
+for m in re.finditer(r'(?m)^#\s+Chapter\s+(\d+):?\s*$', text):   # ★英文章节(冒号可选)
+    chapters.add(int(m.group(1)))
 n_ch = len(chapters)
 signals = len(re.findall(r'[=Σ∑∫∂√±≤≥≠αβγδεθλμπρσφω∞·×÷]|\bpercentage\b', text))
 latexes = len(re.findall(r'\$[^$\n]+\$|\\\[|\\\(', text))
