@@ -38,7 +38,7 @@ def _cn2int(s):
 def _zh_chapter_starts(text):
     """中文教材 第N章: 跳 TOC(含…… 或 末尾页码), 每章取首个正文出现(页眉重复取第一个)."""
     starts = {}
-    for m in re.finditer(r'(?m)^第([一二三四五六七八九十]+)章', text):
+    for m in re.finditer(r'(?m)^#{0,4}\s*第([一二三四五六七八九十]+)章', text):   # 允许 markdown 前导 #
         line = text[m.start(): text.find('\n', m.start()) if text.find('\n', m.start()) > 0 else m.start() + 40]
         if '…' in line or re.search(r'\s\d+\s*$', line):   # TOC 条目(…… 页码)→ 跳
             continue

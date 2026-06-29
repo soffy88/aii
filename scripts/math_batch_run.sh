@@ -136,7 +136,7 @@ def _cn2int(s):
         a,_,b = s.partition('十'); return _CN[a]*10+(_CN.get(b,0) if b else 0)
     return _CN.get(s, 0)
 chapters = set()
-for m in re.finditer(r'(?m)^第([一二三四五六七八九十]+)章', text):
+for m in re.finditer(r'(?m)^#{0,4}\s*第([一二三四五六七八九十]+)章', text):   # 允许 markdown 前导 #
     line = text[m.start(): m.start()+80]
     if '…' in line or re.search(r'\s\d+\s*$', line): continue
     n = _cn2int(m.group(1))
