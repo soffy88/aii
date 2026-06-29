@@ -19,14 +19,23 @@ def _key_terms(label):
     return (words[:3] or [label.lower()[:6]])
 
 
+def _stmt_terms(stmt):
+    """从定理/定义语句里取实质辨识词(content_match 用)."""
+    s = re.sub(r'\$[^$]*\$|\([^)]*\)|[^A-Za-z\s]', ' ', stmt[:200])
+    words = [w for w in re.split(r'\s+', s) if len(w) >= 4 and w.lower() not in _STOP]
+    return (words[:3] or ['theorem'])
+
+
 def extract(chapter_text):
-    """带标记的 定义/定理/法则块 → 知识点列表(去重, 按出现序)."""
+    """两类标记 → 知识点列表(去重, 按出现序):
+       A. OpenStax 黑体 **Definition**/**Theorem** + 块内黑体术语;
+       B. ★编号 'Theorem 14.5' / 'Lemma 4.14' / 'Proposition 7.1' / 'Definition 1.1'(行首, 避开引用)."""
     items, seen = [], set()
+    # ── A. 黑体标记(OpenStax) ──
     for m in re.finditer(r'\*\*(Definition|Theorem|Rule|Lemma|Corollary|Proposition|Property|Law)s?\*\*',
                          chapter_text):
         kind = _KIND[m.group(1)]
         stmt = chapter_text[m.end(): m.end() + 500]
-        # 标签 = 该块语句里第一个"实质"加粗术语(跳过公式编号 **(2.1)** / 单字母 / 页脚噪音)
         label = ''
         for bm in re.finditer(r'\*\*([^*\n]{2,45}?)\*\*', stmt):
             cand = bm.group(1).strip()
@@ -36,20 +45,32 @@ def extract(chapter_text):
                 continue
             label = cand
             break
-        # 无实质加粗术语(纯陈述式定义/定理)→ 跳过, 不造噪音(不回退句子片段)
         if not label or re.match(r'^(Let|If|Suppose|For all|We |Given|Then|Access|Figure)\b', label, re.I):
             continue
         key = re.sub(r'\s+', ' ', label.lower()).strip()
         if key in seen:
             continue
         seen.add(key)
-        items.append({
-            'type': kind,
-            'id': f"{m.group(1).lower()}_{len(items)}",
-            'label': label,
-            'key_terms': _key_terms(label),
-            'pos': m.start(),
-        })
+        items.append({'type': kind, 'id': f"{m.group(1).lower()}_{len(items)}",
+                      'label': label, 'key_terms': _key_terms(label), 'pos': m.start()})
+    # ── B. ★编号标记(行首, 避开 'by Theorem X.X' 式引用) ──
+    for m in re.finditer(
+            r'(?m)^\s*\*{0,2}(Definition|Theorem|Lemma|Corollary|Proposition|Rule|Law)\*{0,2}\s+(\d+(?:\.\d+)?)\b',
+            chapter_text):
+        kw, num = m.group(1), m.group(2)
+        kind = _KIND.get(kw, 'theorem')
+        key = f"{kw.lower()} {num}"
+        if key in seen:
+            continue
+        seen.add(key)
+        stmt = chapter_text[m.end(): m.end() + 400]
+        title_m = re.match(r'\s*[\(\.：:]\s*\*{0,2}([A-Z][^)*\n.]{3,40})', stmt)   # 'Theorem 14.5 (Title)'
+        title = title_m.group(1).strip() if title_m else ''
+        label = f"{kw} {num}" + (f": {title}" if title else "")
+        items.append({'type': kind, 'id': f"{kw.lower()}_{num}",
+                      'label': label, 'key_terms': (_key_terms(title) if title else _stmt_terms(stmt)),
+                      'pos': m.start()})
+    items.sort(key=lambda x: x['pos'])
     return items
 
 

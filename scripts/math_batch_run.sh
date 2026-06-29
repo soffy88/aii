@@ -146,13 +146,14 @@ for m in re.finditer(r'(?m)^#\s+Chapter\s+(\d+):?\s*$', text):   # ★英文章�
 n_ch = len(chapters)
 signals = len(re.findall(r'[=Σ∑∫∂√±≤≥≠αβγδεθλμπρσφω∞·×÷]|\bpercentage\b', text))
 latexes = len(re.findall(r'\$[^$\n]+\$|\\\[|\\\(', text))
+garble = len(re.findall(r'(?:\b[A-Za-z] ){5,}', text))   # ★OCR间隔字母乱码 'C H A P T E R'(born-digital无)
 issues = []
 if n_ch < 3:
     issues.append(f'R1:章节数({n_ch})<3')
-if signals > 30 and latexes == 0:
-    issues.append(f'R6_HARD:数学信号{signals}但无LaTeX(OCR破坏公式)')
-elif signals > 30 and latexes > 0 and latexes/signals < 0.10:
-    issues.append(f'R6_ALARM:公式严重残缺(信号{signals}/LaTeX{latexes}={latexes/signals:.0%})')
+# ★R6 放宽(born-digital aware): 只在 OCR 乱码(公式被毁)时硬拒; born-digital 干净 unicode 公式
+#   (无/少 LaTeX 但 garble 低)→ 放行(A仓给人读够用; 保真低于LaTeX但非乱码).
+if signals > 30 and latexes == 0 and garble > 20:
+    issues.append(f'R6_HARD:数学信号{signals}无LaTeX且OCR乱码(garble={garble}) → 公式被毁')
 if issues:
     print('FAIL:' + '; '.join(issues))
 else:
