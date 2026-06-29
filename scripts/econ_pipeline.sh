@@ -36,13 +36,16 @@ PIPELINE_CKPT_DIR="${PIPELINE_CKPT_DIR:-econ_pipeline/ckpts}"
 mkdir -p "$QUAL_DIR" "$PIPELINE_CKPT_DIR"
 QUAL_JSON="$QUAL_DIR/${SUBSTRATE}.json"
 
-# ★★★ 固化标识: 经济学管道标准版本 ★★★
-# v1.1 (2026-06-28): 在 v1.0(microecon_en_full_v2 验证)基础上, 固化"程序端WHAT升级":
-#   A 定位 _find_pos 优先真定义框 + 全程跳过目录条目(治本防误落目录)
-#   B 边界 _clean_window 清脚注/URL引文/孤立页码(治本防污染窗口)
-#   C/D 已成熟: 程序抓 定义框/例子/公式/图表标题/表格数据 + 例子去重+代表性排序
-#   分流: 程序抓 WHAT 骨架, gemma4(本地全GPU) 只补 WHY/HOW → 减 LLM 负担、降成本
-ECON_PIPELINE_VERSION="econ-std-v1.1"
+# ★★★ 固化标识: 经济学 A仓 KU 抽取标准(已验证, 全自动)★★★
+# econ-A仓-v1.3 (2026-06-29): 双仓架构 A仓标准 = 只忠实抽原始KU给人读(全/不漏/中文).
+#   验证: microecon ch9弹性(两约束守住) + Mankiw 生产跑通(persist修复确认).
+#   固化内容:
+#   ① 程序WHAT骨架 + LLM补WHY/HOW(v1.1基础: _find_pos优先真定义框+跳目录, _clean_window清脚注/页码)
+#   ② plan 14K小块(v1.2: 密度大的章granular不被摘要漏)
+#   ③ 六类抽取 + 主动抽why(每概念配rationale) + 准入闸门 + 两约束(rationale不编因果/positional不附会)
+#   ④ A仓瘦身5步: 讲透+完整性严 / 概念抽取(不共现) / 按章KC / BU(单本枢纽) / KU质量门(含六分类rationale≠0)
+#   ⑤ 卸B仓: 有向/归一/谱社区/超边(explains链留provenance)/本性; persist不插生成列is_positional
+ECON_PIPELINE_VERSION="econ-A仓-v1.3"
 export SUBSTRATE AII_MD_FILE PIPELINE_CKPT_DIR ECON_PIPELINE_VERSION
 
 PY=.venv/bin/python

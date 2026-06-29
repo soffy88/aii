@@ -24,7 +24,7 @@ _CTX = 130000
 _WIN_PRE        = 500    # 知识点 pos 前的 chars(标准路径)
 # ★★ 固化标识: 经济学管道程序端标准版本(随 econ_pipeline.sh econ-std-v1.1) ★★
 # v1.1: A定位优先真定义框+跳目录 / B窗口清脚注·URL·页码 / C-D WHAT骨架+例子去重(成熟)
-PIPELINE_VERSION = "econ-std-v1.2"  # v1.2: plan 用14K小块(密度大的章granular抽取, 不被LLM摘要成~10个)
+PIPELINE_VERSION = "econ-A仓-v1.3"  # 固化: A仓标准(六类+主动抽why+准入+两约束; plan14K小块; 瘦身5步)
 
 _WIN_POST       = 20000  # 知识点 pos 后的 chars(标准路径)
 _WIN_FALLBACK   = 40000  # pos 未找到时 fallback
