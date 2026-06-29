@@ -40,22 +40,18 @@ async def go():
                 await c.execute("INSERT INTO aii.ku_concept_onto(ku_id,concept_id) VALUES($1,$2) ON CONFLICT DO NOTHING",kid,cid[n]); links+=1
     print(f"ku_concept links: {links}", flush=True)
     # 4. 共现 (纯SQL, 0 LLM): 共享概念对 + 语义余弦 + 强度
-    # ★A仓瘦身: 共现喂谱社区=B仓. A仓默认只概念抽取不做共现; B仓路径 AII_COOCCUR=1 才做.
-    if os.getenv("AII_COOCCUR", "0") == "1":
-        await c.execute("DELETE FROM aii.ku_cooccurrence WHERE substrate_id=$1",SUB)
-        await c.execute(f"""
-          INSERT INTO aii.ku_cooccurrence(substrate_id,ku_a,ku_b,shared_concept_count,semantic_sim,strength)
-          SELECT $1, a.ku_id, b.ku_id, count(*) shared,
-                 (1-(ka.embedding<=>kb.embedding))::real sim,
-                 CASE WHEN count(*)>=2 AND (1-(ka.embedding<=>kb.embedding))>=0.80 THEN 'strong'
-                      WHEN count(*)>=2 THEN 'medium' ELSE 'weak' END
-          FROM aii.ku_concept_onto a JOIN aii.ku_concept_onto b ON a.concept_id=b.concept_id AND a.ku_id<b.ku_id
-          JOIN aii.ku_onto ka ON a.ku_id=ka.ku_id AND ka.substrate_id=$1
-          JOIN aii.ku_onto kb ON b.ku_id=kb.ku_id AND kb.substrate_id=$1
-          GROUP BY a.ku_id,b.ku_id,ka.embedding,kb.embedding""", SUB)
-        n=await c.fetchval("SELECT count(*) FROM aii.ku_cooccurrence WHERE substrate_id=$1",SUB)
-        print(f"co-occurrence links: {n}", flush=True)
-    else:
-        print("co-occurrence: skipped (A仓 concept-only; 共现=B仓, AII_COOCCUR=1 才做)", flush=True)
+    await c.execute("DELETE FROM aii.ku_cooccurrence WHERE substrate_id=$1",SUB)
+    await c.execute(f"""
+      INSERT INTO aii.ku_cooccurrence(substrate_id,ku_a,ku_b,shared_concept_count,semantic_sim,strength)
+      SELECT $1, a.ku_id, b.ku_id, count(*) shared,
+             (1-(ka.embedding<=>kb.embedding))::real sim,
+             CASE WHEN count(*)>=2 AND (1-(ka.embedding<=>kb.embedding))>=0.80 THEN 'strong'
+                  WHEN count(*)>=2 THEN 'medium' ELSE 'weak' END
+      FROM aii.ku_concept_onto a JOIN aii.ku_concept_onto b ON a.concept_id=b.concept_id AND a.ku_id<b.ku_id
+      JOIN aii.ku_onto ka ON a.ku_id=ka.ku_id AND ka.substrate_id=$1
+      JOIN aii.ku_onto kb ON b.ku_id=kb.ku_id AND kb.substrate_id=$1
+      GROUP BY a.ku_id,b.ku_id,ka.embedding,kb.embedding""", SUB)
+    n=await c.fetchval("SELECT count(*) FROM aii.ku_cooccurrence WHERE substrate_id=$1",SUB)
+    print(f"co-occurrence links: {n}", flush=True)
     await c.close()
 asyncio.run(go())

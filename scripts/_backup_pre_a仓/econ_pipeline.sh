@@ -56,26 +56,36 @@ echo "  QUAL=$QUAL_JSON"
 echo "════════════════════════════════════════════"
 
 # ★步骤失败直接退出(set -e), 不静默通过
-# ★★ A仓瘦身(双仓架构): A仓只忠实抽原始KU给人读(全/不漏/中文). 卸到B仓的:
-#    有向关系readout / 节点归一normalize / KU内部逻辑structure / 共现 / 谱社区 / 概念归一 / 超边 / 本性.
 echo ""
-echo "[1/5] 逐章讲透 KU + ★完整性校验严(应有清单, A仓命门:不漏) + 打磨(去脚手架/空壳/残留)"
-$PY scripts/synthesize_book.py || { echo "❌ [1/5] 失败"; exit 2; }
+echo "[1/8] 逐章讲透 KU + 完整性校验(黑体术语should-have) + 打磨(去脚手架/空壳/残留)"
+$PY scripts/synthesize_book.py || { echo "❌ [1/8] 失败"; exit 2; }
 
 echo ""
-echo "[2/5] 概念抽取(单本KU涉及哪些概念; ★只概念不共现, 共现=B仓)"
-$PY scripts/materialize_links.py || { echo "❌ [2/5] 失败"; exit 2; }
+echo "[2/8] 概念抽取 + 共现联结(纯计算, 书内)"
+$PY scripts/materialize_links.py || { echo "❌ [2/8] 失败"; exit 2; }
 
 echo ""
-echo "[3/5] 按章KC(书内结构, 给人按书读) + 双语簇摘要"
-$PY scripts/persist_chapter_kc.py && $PY scripts/fix_kc_labels_summaries.py || { echo "❌ [3/5] 失败"; exit 2; }
+echo "[3/8] 有向关系读出(讲透KU读出, 非N²judge)"
+$PY scripts/readout_all.py || { echo "❌ [3/8] 失败"; exit 2; }
 
 echo ""
-echo "[4/5] BU 书级理解(七项; ★单本枢纽=ku_concept度数+按章KC, 不碰B仓概念图) 入库"
-$PY scripts/generate_bu.py && $PY scripts/persist_bu.py || { echo "❌ [4/5] 失败"; exit 2; }
+echo "[4/8] 节点归一: 概念级有向→图 / KU内部逻辑→留KU"
+$PY scripts/normalize_readout.py || { echo "❌ [4/8] 失败"; exit 2; }
 
 echo ""
-echo "[5/5] ★KU质量门(complete严/残留/空壳/双语/讲浅/密度/章; 去有向密度/六分类/explains=查B仓产物) → $QUAL_JSON"
+echo "[5/8] KU内部逻辑结构化(因果链+分解树) + 节点归一"
+$PY scripts/structure_logic.py && $PY scripts/normalize_ku_logic_nodes.py || { echo "❌ [5/8] 失败"; exit 2; }
+
+echo ""
+echo "[6/8] 按章KC(中文主题名) + 双语簇摘要"
+$PY scripts/persist_chapter_kc.py && $PY scripts/fix_kc_labels_summaries.py || { echo "❌ [6/8] 失败"; exit 2; }
+
+echo ""
+echo "[7/8] BU 书级理解(七项+忠实校验) 入库"
+$PY scripts/generate_bu.py && $PY scripts/persist_bu.py || { echo "❌ [7/8] 失败"; exit 2; }
+
+echo ""
+echo "[8/8] ★质量门全检(complete/残留/空壳/双语/有向/KU密度/讲浅/章密度) → $QUAL_JSON"
 $PY scripts/econ_quality_gate.py "$SUBSTRATE" --json "$QUAL_JSON"
 GATE_EXIT=$?
 
