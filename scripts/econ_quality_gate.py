@@ -177,10 +177,15 @@ async def run():
         "SELECT count(*) FROM aii.bu_onto WHERE substrate_id=$1", SUB))
     metrics["BU已生成"] = "是" if has_bu else "否"
 
-    # ── 六分类分布(仅信息, A仓 KU 属性; ★不作报警——六分类深度/explains 由 B仓查) ──
+    # ── ★六分类分布(A仓的事: 六分类是为便于识别/抽取知识=抽取质量; B仓只管关系不管类别) ──
     type_rows = await conn.fetch(
         "SELECT knowledge_type, count(*) n FROM aii.ku_onto WHERE substrate_id=$1 GROUP BY 1 ORDER BY 2 DESC", SUB)
-    metrics["六分类分布(信息)"] = {r["knowledge_type"]: r["n"] for r in type_rows}
+    type_dist = {r["knowledge_type"]: r["n"] for r in type_rows}
+    metrics["六分类分布"] = type_dist
+    rationale_n = type_dist.get("rationale", 0)
+    top_share = (max(type_dist.values()) / max(ku_total, 1)) if type_dist else 1.0
+    metrics["rationale(why)数"] = rationale_n
+    metrics["最大类占比%"] = round(100 * top_share)
 
     # ── 章级 KU 分布 ──
     ch_rows = await conn.fetch(
@@ -261,7 +266,12 @@ async def run():
 
     if not has_bu:
         alarms.append("BU未生成(书级理解缺失)")
-    # ★A仓瘦身: 不查六分类深度/explains/有向边(那些是 B仓产物). 六分类分布仅作信息(上方 metrics).
+    # ★六分类是A仓的事(便于识别/抽取知识): rationale≠0(抽到为什么/论断,非只概念) + 单类不独吞
+    if ku_total > 0 and rationale_n == 0:
+        alarms.append("rationale(why)=0: 没抽到为什么/论断, 退回概念-only(A仓抽取深度不足)")
+    if top_share > 0.95 and ku_total > 20:
+        alarms.append(f"单类独吞{round(100*top_share)}%>95%(只抽了一类, 没抽全六类)")
+    # ★只有 explains边/有向边密度 = B仓产物(关系, 跨KU/跨书), A仓不查
 
     # ── 输出 ──
     result = {
@@ -284,7 +294,7 @@ async def run():
         print(f"  {k}: {v}")
     print(f"\n阈值[A仓]: complete≥{TH['complete_pct']}% | 残留=0 | 空壳=0 | 双语≥{TH['bilingual_min']}%"
           f" | KU密度≥{TH['ku_density']:.0%}预期 | 讲浅(面缺)=0 | 章KU≥{TH['chapter_floor']}"
-          f"  (有向/六分类/explains=B仓, A仓不查)")
+          f" | ★rationale≠0+单类<95%(六分类是A仓)  (有向边/explains=B仓, A仓不查)")
     if alarms:
         print(f"\n🚨 报警({len(alarms)}):")
         for a in alarms:

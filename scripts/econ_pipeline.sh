@@ -75,7 +75,7 @@ echo "[4/5] BU 书级理解(七项; ★单本枢纽=ku_concept度数+按章KC, �
 $PY scripts/generate_bu.py && $PY scripts/persist_bu.py || { echo "❌ [4/5] 失败"; exit 2; }
 
 echo ""
-echo "[5/5] ★KU质量门(complete严/残留/空壳/双语/讲浅/密度/章; 去有向密度/六分类/explains=查B仓产物) → $QUAL_JSON"
+echo "[5/5] ★KU质量门(complete严/残留/空壳/双语/讲浅/密度/章/★六分类rationale≠0; 去有向边/explains=B仓) → $QUAL_JSON"
 $PY scripts/econ_quality_gate.py "$SUBSTRATE" --json "$QUAL_JSON"
 GATE_EXIT=$?
 
