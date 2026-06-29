@@ -158,8 +158,15 @@ try:
     if q['ok']:
         print('PASS')
     else:
-        fails = '; '.join(f[\"check\"]+\":\"+f[\"detail\"][:50] for f in q['hard_failures'])
-        print(f'FAIL:{fails}')
+        # ★中文书: 仅 chapter_structure(R1英文 # Chapter N:)失败 且有中文章节(第N章)≥3 → PASS_ZH
+        from chapter_ingest import chapter_starts
+        n = len(chapter_starts(text))
+        nonch = [f for f in q['hard_failures'] if f['check'] != 'chapter_structure']
+        if not nonch and n >= 3:
+            print(f'PASS_ZH:{n}章')
+        else:
+            fails = '; '.join(f[\"check\"]+\":\"+f[\"detail\"][:50] for f in q['hard_failures'])
+            print(f'FAIL:{fails}')
 except Exception as e:
     # R1检查可能失败(中文书无英文章节标题) → 改用章节数量检查
     from chapter_ingest import chapter_starts
